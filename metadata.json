@@ -1,0 +1,5 @@
+{
+  "name": "PySpace Invaders",
+  "description": "A retro-styled Space Invaders clone running inside a simulated MacOS terminal environment, featuring a 'Python' AI console powered by Gemini.",
+  "requestFramePermissions": []
+}
