@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile } from '../types';
 
@@ -161,6 +160,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   // Input Handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in console
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
       if (status !== GameStatus.PLAYING) return;
       if (e.code === 'ArrowLeft') gameState.current.keys.left = true;
       if (e.code === 'ArrowRight') gameState.current.keys.right = true;
@@ -172,6 +174,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
+      // Ignore if user is typing in console
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
       if (e.code === 'ArrowLeft') gameState.current.keys.left = false;
       if (e.code === 'ArrowRight') gameState.current.keys.right = false;
       if (e.code === 'Space') {
@@ -1141,6 +1146,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   // Menu controls
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+          // Ignore if user is typing in console
+          if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+
           if (e.code === 'Enter') {
               if (status === GameStatus.MENU || status === GameStatus.GAME_OVER || status === GameStatus.VICTORY) {
                   setStatus(GameStatus.PLAYING);
