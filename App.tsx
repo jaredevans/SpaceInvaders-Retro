@@ -44,13 +44,9 @@ const App: React.FC = () => {
                     onLog={handleLog}
                 />
                 
-                <div className="mt-4 text-xs text-cyan-400 text-glow text-center hidden md:block" style={{ textShadow: '0 0 5px rgba(0,243,255,0.3)' }}>
+                <div className="mt-4 text-xs text-cyan-400 text-glow text-center" style={{ textShadow: '0 0 5px rgba(0,243,255,0.3)' }}>
                     <div>CONTROLS: [LEFT/RIGHT] Move • [SPACE] Fire • [ENTER] Start</div>
                     <div className="text-pink-400 mt-1 font-semibold">Tip: Choose wisely when you hit the mothership</div>
-                </div>
-                 <div className="mt-4 text-xs text-cyan-400 text-glow text-center md:hidden font-semibold">
-                    <div>CONTROLS: Drag to Move • Auto-Fire Active</div>
-                    <div className="text-pink-400 mt-1">Tip: Choose wisely when you hit the mothership</div>
                 </div>
             </div>
 

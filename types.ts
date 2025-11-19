@@ -1,3 +1,4 @@
+
 export enum GameStatus {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
@@ -31,6 +32,11 @@ export interface Alien extends Entity {
 export interface Projectile extends Entity {
   velocity: number;
   isEnemy: boolean;
+  // Special bullet properties
+  vx?: number;
+  vy?: number;
+  type?: 'STANDARD' | 'HOMING_LIGHTNING';
+  phase?: 'ASCEND' | 'HOME';
 }
 
 export interface Particle extends Entity {
