@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile } from '../types';
 
 // Constants
@@ -56,6 +56,7 @@ interface GameCanvasProps {
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setScore, onLog }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
   
   // Mutable game state (refs for performance in RAF loop)
   const gameState = useRef({
@@ -82,8 +83,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     chaosMode: false, // Triggered when mothership is destroyed
     pauseUntil: 0, // For hit-stop effects
     keys: { left: false, right: false, shoot: false, shootPressed: false },
+    lastFireTime: 0, // For mobile auto-fire throttle
     attackCooldown: 60
   });
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Initialize Aliens
   const initGame = () => {
@@ -265,6 +276,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       // Player Movement
       if (state.keys.left) state.player.pos.x = Math.max(0, state.player.pos.x - PLAYER_SPEED);
       if (state.keys.right) state.player.pos.x = Math.min(CANVAS_WIDTH - state.player.width, state.player.pos.x + PLAYER_SPEED);
+
+      // Mobile Auto-Fire Logic (Machine Gun style)
+      if (isMobile && status === GameStatus.PLAYING) {
+          if (now - state.lastFireTime > 250) {
+              state.keys.shoot = true;
+              state.lastFireTime = now;
+          }
+      }
 
       // Shooting
       if (state.keys.shoot) {
@@ -779,7 +798,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       // Bullets
       const time = Date.now();
       state.bullets.forEach(b => {
-        // Bullets use the standard neon renderer but we can modulate opacity/color elsewhere if needed
         drawNeonText(b.symbol, b.pos.x, b.pos.y, b.color);
       });
 
@@ -901,23 +919,59 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       return () => window.removeEventListener('keydown', handleKeyDown);
   }, [status, setStatus]);
 
-  return (
-    <div className="relative border-2 border-cyan-500/40 bg-[#050010] rounded-sm shadow-[0_0_50px_rgba(0,243,255,0.3)] overflow-hidden" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="block"
-        style={{ cursor: 'none' }}
-      />
+  // Touch Handler for Drag Movement and Mobile Interaction
+  const handleTouch = (e: React.TouchEvent) => {
+      if (!isMobile) return;
+      
+      // If game isn't playing, tapping anywhere starts/restarts it
+      if (status !== GameStatus.PLAYING) {
+          // Simple debounce or check to prevent accidental double tap logic if needed, 
+          // but status changes usually trigger re-renders.
+          setStatus(GameStatus.PLAYING);
+          return;
+      }
 
-      {/* GAME OVER OVERLAY */}
-      {status === GameStatus.GAME_OVER && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-20 p-4 pointer-events-auto">
-            <h1 className="text-red-500 font-bold text-4xl mb-4 text-glow-strong font-mono animate-pulse">SYSTEM FAILURE</h1>
-            <p className="text-gray-400 text-xs animate-pulse">PRESS [ENTER] TO REBOOT SYSTEM</p>
-        </div>
-      )}
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      const scaleX = CANVAS_WIDTH / rect.width;
+      
+      // Calculate relative X position on the internal canvas resolution
+      let touchX = (touch.clientX - rect.left) * scaleX;
+      
+      // Center player on finger
+      touchX -= gameState.current.player.width / 2;
+      
+      // Clamp to boundaries
+      touchX = Math.max(0, Math.min(CANVAS_WIDTH - gameState.current.player.width, touchX));
+      
+      gameState.current.player.pos.x = touchX;
+  };
+
+  return (
+    <div className="relative flex flex-col items-center w-full max-w-[600px]" style={{ touchAction: 'none' }}>
+      <div 
+        className="relative border-2 border-cyan-500/40 bg-[#050010] rounded-sm shadow-[0_0_50px_rgba(0,243,255,0.3)] overflow-hidden w-full aspect-[600/500]"
+        onTouchStart={handleTouch}
+        onTouchMove={handleTouch}
+      >
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_WIDTH}
+          height={CANVAS_HEIGHT}
+          className="block w-full h-full object-contain"
+        />
+
+        {/* GAME OVER OVERLAY */}
+        {status === GameStatus.GAME_OVER && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-20 p-4 pointer-events-none">
+              <h1 className="text-red-500 font-bold text-4xl mb-4 text-glow-strong font-mono animate-pulse">SYSTEM FAILURE</h1>
+              <p className="text-gray-400 text-xs animate-pulse">TAP SCREEN TO REBOOT</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
