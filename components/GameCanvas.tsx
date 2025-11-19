@@ -56,6 +56,7 @@ interface GameCanvasProps {
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setScore, onLog }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   
   // Mutable game state (refs for performance in RAF loop)
   const gameState = useRef({
@@ -149,6 +150,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     onLog("System: Initializing Chromatic_Wave...");
     onLog("System: Multi-spectrum targets detected.");
   };
+
+  // Focus on mount
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.focus();
+    }
+  }, []);
 
   useEffect(() => {
     if (status === GameStatus.PLAYING) {
@@ -1160,7 +1168,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   }, [status, setStatus]);
 
   return (
-    <div className="relative flex flex-col items-center w-full max-w-[600px]">
+    <div 
+        ref={containerRef}
+        tabIndex={0}
+        className="relative flex flex-col items-center w-full max-w-[600px] outline-none"
+    >
       <canvas
         ref={canvasRef}
         width={CANVAS_WIDTH}

@@ -103,7 +103,6 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
           onChange={(e) => setInput(e.target.value)}
           className="flex-1 bg-transparent outline-none text-lime-100 placeholder-lime-700/50 focus:placeholder-transparent text-glow caret-lime-500"
           placeholder="ask anything about game"
-          autoFocus
           disabled={isLoading}
         />
       </form>
