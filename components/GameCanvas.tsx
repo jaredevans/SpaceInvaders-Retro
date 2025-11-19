@@ -10,12 +10,41 @@ const ALIEN_SPEED_BASE = 0.5;
 const ALIEN_DROP = 20;
 const UFO_SPEED = 3;
 
-// Alien Definitions
-const ALIEN_TYPES: Record<Exclude<AlienSpecies, 'MOTHERSHIP'>, { symbol: string, color: string, score: number }> = {
-  DREADNOUGHT: { symbol: '[<o>]', color: '#ff00ff', score: 40 },
-  DESTROYER:   { symbol: '/-^-\\', color: '#00ffff', score: 20 },
-  VANGUARD:    { symbol: '}w{',   color: '#ffff00', score: 10 },
+// Extended Outrun / Miami Vice Palette
+const PALETTE = {
+    CYAN: '#00f3ff',
+    PINK: '#ff00ff',
+    PURPLE: '#bc13fe',
+    ORANGE: '#ff6600',
+    YELLOW: '#ffe600',
+    RED: '#ff0055',
+    WHITE: '#ffffff',
+    LIME: '#ccff00',
+    ELECTRIC_BLUE: '#2e2bfd',
+    HOT_MAGENTA: '#ff00cc'
 };
+
+// Alien Definitions with 80s colors
+const ALIEN_TYPES: Record<Exclude<AlienSpecies, 'MOTHERSHIP'>, { symbol: string, color: string, score: number }> = {
+  DREADNOUGHT: { symbol: '[<o>]', color: PALETTE.PURPLE, score: 40 },
+  DESTROYER:   { symbol: '/-^-\\', color: PALETTE.PINK, score: 20 },
+  VANGUARD:    { symbol: '}w{',   color: PALETTE.ORANGE, score: 10 },
+};
+
+interface Star {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
+  alpha: number;
+  color: string;
+}
+
+interface Lightning {
+  path: {x: number, y: number}[];
+  life: number;
+  color: string;
+}
 
 interface GameCanvasProps {
   status: GameStatus;
@@ -30,13 +59,28 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   
   // Mutable game state (refs for performance in RAF loop)
   const gameState = useRef({
-    player: { pos: { x: CANVAS_WIDTH / 2 - 15, y: CANVAS_HEIGHT - 40 }, width: 30, height: 20, active: true, symbol: '_^_', color: '#00ff00' } as Entity,
+    player: { pos: { x: CANVAS_WIDTH / 2 - 15, y: CANVAS_HEIGHT - 40 }, width: 30, height: 20, active: true, symbol: '_^_', color: PALETTE.CYAN } as Entity,
     aliens: [] as Alien[],
+    totalAliens: 0, // Track initial count for percentage calculations
     ufo: null as Alien | null,
     bullets: [] as Projectile[],
     particles: [] as Particle[],
+    lightning: [] as Lightning[],
+    stars: Array.from({ length: 120 }, () => {
+        const colors = Object.values(PALETTE); // Use all colors for stars
+        return {
+            x: Math.random() * CANVAS_WIDTH,
+            y: Math.random() * CANVAS_HEIGHT,
+            size: Math.random() > 0.95 ? 2.5 : 1, // Occasional larger star
+            speed: 0.2 + Math.random() * 1.2,
+            alpha: 0.3 + Math.random() * 0.7,
+            color: colors[Math.floor(Math.random() * colors.length)]
+        };
+    }) as Star[],
     alienDirection: 1, // 1 for right, -1 for left
     alienSpeed: ALIEN_SPEED_BASE,
+    chaosMode: false, // Triggered when mothership is destroyed
+    pauseUntil: 0, // For hit-stop effects
     keys: { left: false, right: false, shoot: false, shootPressed: false },
     attackCooldown: 60
   });
@@ -48,12 +92,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     const aliens: Alien[] = [];
     
     for (let r = 0; r < rows; r++) {
-      // Determine Species by Row
+      // Determine Species & Color by Row for Rainbow/Gradient Effect
       let species: AlienSpecies = 'VANGUARD';
-      if (r === 0) species = 'DREADNOUGHT';
-      else if (r === 1 || r === 2) species = 'DESTROYER';
+      let rowColor = PALETTE.LIME;
+
+      if (r === 0) { 
+          species = 'DREADNOUGHT'; 
+          rowColor = PALETTE.PURPLE; 
+      } else if (r === 1) { 
+          species = 'DESTROYER'; 
+          rowColor = PALETTE.HOT_MAGENTA; 
+      } else if (r === 2) { 
+          species = 'DESTROYER'; 
+          rowColor = PALETTE.PINK; 
+      } else if (r === 3) { 
+          species = 'VANGUARD'; 
+          rowColor = PALETTE.ORANGE; 
+      } else { 
+          species = 'VANGUARD'; 
+          rowColor = PALETTE.LIME; 
+      }
       
-      // Safe lookup for non-Mothership types
       const typeDef = ALIEN_TYPES[species as Exclude<AlienSpecies, 'MOTHERSHIP'>];
 
       for (let c = 0; c < cols; c++) {
@@ -66,23 +125,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           col: c,
           scoreValue: typeDef.score,
           symbol: typeDef.symbol,
-          color: typeDef.color,
+          color: rowColor, // Use row-specific color
           species: species
         });
       }
     }
     
     gameState.current.aliens = aliens;
+    gameState.current.totalAliens = aliens.length;
     gameState.current.ufo = null;
     gameState.current.bullets = [];
     gameState.current.particles = [];
+    gameState.current.lightning = [];
     gameState.current.player.pos.x = CANVAS_WIDTH / 2 - 15;
     gameState.current.player.active = true;
     gameState.current.alienSpeed = ALIEN_SPEED_BASE;
     gameState.current.attackCooldown = 60;
+    gameState.current.chaosMode = false;
+    gameState.current.pauseUntil = 0;
     setScore(0);
-    onLog("System: Initializing game entities...");
-    onLog("System: Threat analysis - Dreadnoughts, Destroyers, and Vanguards detected.");
+    onLog("System: Initializing Chromatic_Wave...");
+    onLog("System: Multi-spectrum targets detected.");
   };
 
   useEffect(() => {
@@ -95,6 +158,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   // Input Handling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (status !== GameStatus.PLAYING) return;
       if (e.code === 'ArrowLeft') gameState.current.keys.left = true;
       if (e.code === 'ArrowRight') gameState.current.keys.right = true;
       if (e.code === 'Space') {
@@ -119,7 +183,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [status]);
 
   // Game Loop
   useEffect(() => {
@@ -129,24 +193,31 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     const render = () => {
       if (!ctx || !canvasRef.current) return;
 
-      // Clear
-      ctx.fillStyle = '#000000';
+      // Background: Deep Dark Purple/Black
+      ctx.fillStyle = '#050010'; 
       ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       
-      // Scanline effect
-      ctx.fillStyle = 'rgba(0, 255, 0, 0.02)';
+      // Draw Stars (Background Layer)
+      drawStars(ctx);
+
+      // Scanline effect (Subtle multicolor tint)
+      ctx.fillStyle = 'rgba(0, 255, 255, 0.02)';
+      ctx.shadowBlur = 0;
       for (let i = 0; i < CANVAS_HEIGHT; i += 4) {
           ctx.fillRect(0, i, CANVAS_WIDTH, 1);
       }
 
       if (status === GameStatus.PLAYING) {
-        update();
+        if (Date.now() > gameState.current.pauseUntil) {
+          update();
+        }
         draw(ctx);
       } else if (status === GameStatus.MENU) {
         drawMenu(ctx);
       } else if (status === GameStatus.GAME_OVER) {
         draw(ctx); // Draw frozen state
-        drawGameOver(ctx);
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       } else if (status === GameStatus.VICTORY) {
         draw(ctx);
         drawVictory(ctx);
@@ -154,9 +225,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
       animationFrameId = requestAnimationFrame(render);
     };
+    
+    const drawStars = (ctx: CanvasRenderingContext2D) => {
+        const state = gameState.current;
+        
+        state.stars.forEach(star => {
+            // Update
+            star.y += star.speed;
+            if (star.y > CANVAS_HEIGHT) {
+                star.y = 0;
+                star.x = Math.random() * CANVAS_WIDTH;
+            }
+            // Twinkle
+            if (Math.random() < 0.02) star.alpha = 0.3 + Math.random() * 0.7;
+
+            // Draw with colored glow
+            ctx.shadowBlur = star.size * 3;
+            ctx.shadowColor = star.color;
+            ctx.fillStyle = star.color;
+            ctx.globalAlpha = star.alpha;
+            ctx.fillRect(star.x, star.y, star.size, star.size);
+            ctx.globalAlpha = 1.0;
+        });
+        ctx.shadowBlur = 0;
+    };
 
     const update = () => {
       const state = gameState.current;
+      const now = Date.now();
+
+      // Calculate Alien Speed based on percentage remaining
+      const activeAliensCount = state.aliens.filter(a => a.active).length;
+      if (state.totalAliens > 0) {
+        const fractionLost = (state.totalAliens - activeAliensCount) / state.totalAliens;
+        const chunks = Math.floor(fractionLost / 0.1);
+        state.alienSpeed = ALIEN_SPEED_BASE * Math.pow(1.1, chunks);
+      }
 
       // Player Movement
       if (state.keys.left) state.player.pos.x = Math.max(0, state.player.pos.x - PLAYER_SPEED);
@@ -164,15 +268,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
       // Shooting
       if (state.keys.shoot) {
+        const bulletX = state.player.pos.x + state.player.width / 2 - 2;
+        const bulletY = state.player.pos.y;
+
+        createMuzzleFlash(bulletX + 2, bulletY);
+
         state.bullets.push({
-          pos: { x: state.player.pos.x + state.player.width / 2 - 2, y: state.player.pos.y },
+          pos: { x: bulletX, y: bulletY },
           width: 4,
           height: 10,
           active: true,
           velocity: -BULLET_SPEED,
           isEnemy: false,
           symbol: '|',
-          color: '#ffff00'
+          color: PALETTE.YELLOW
         });
         state.keys.shoot = false;
       }
@@ -212,29 +321,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             b.active = false;
             ufo.active = false;
             setScore(prev => prev + ufo.scoreValue);
-            createExplosion(ufo.pos.x + ufo.width/2, ufo.pos.y + ufo.height/2, ufo.color);
             
-            // Revenge Attack: Spawn Flaming Ball
-            state.bullets.push({
-                pos: { x: ufo.pos.x + ufo.width / 2 - 6, y: ufo.pos.y + ufo.height },
-                width: 12,
-                height: 12,
-                active: true,
-                velocity: 12, // Very fast drop
-                isEnemy: true,
-                symbol: '{O}',
-                color: '#ff4400'
-            });
+            // Massive visual effects
+            const centerX = ufo.pos.x + ufo.width/2;
+            const centerY = ufo.pos.y + ufo.height/2;
+            createExplosion(centerX, centerY, ufo.color, true);
+            
+            // Lightning flash to all active aliens
+            const remainingAliens = state.aliens.filter(a => a.active);
+            createLightningStorm(centerX, centerY, remainingAliens);
+            
+            // TRIGGER CHAOS MODE
+            state.chaosMode = true;
+            state.pauseUntil = Date.now() + 1500; // 1.5s hit-stop
+            onLog("System: MOTHERSHIP DOWN. HIVE MIND SEVERED.");
+            onLog("System: WARNING: ORBITAL DECAY DETECTED.");
             
             state.ufo = null;
-            onLog("System: MOTHERSHIP DESTROYED. +150 PTS");
-            onLog("System: WARNING! UNSTABLE CORE EJECTED!");
           }
         }
       });
 
-      // UFO Logic
-      if (!state.ufo && Math.random() < 0.0015) { // Approx every 10-12 seconds
+      // UFO Logic (Spawn if not Chaos Mode)
+      if (!state.chaosMode && !state.ufo && Math.random() < 0.0015) { 
           const direction = Math.random() > 0.5 ? 1 : -1;
           const startX = direction === 1 ? -50 : CANVAS_WIDTH + 10;
           state.ufo = {
@@ -244,68 +353,188 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
               scoreValue: 150,
               species: 'MOTHERSHIP',
               symbol: '<(^_^)>',
-              color: '#ff3333'
+              color: PALETTE.RED
           };
-          onLog("System: ALERT! Unknown bogey entering airspace.");
-          // We store the direction in a custom property if we wanted, but simpler to just derive velocity from logic or store it in Entity?
-          // For now, hack it by attaching velocity to the UFO entity or using a closure variable isn't great for RAF.
-          // Let's assume UFO always moves towards the other side.
+          onLog("System: ALERT! High-velocity signature detected.");
           (state.ufo as any).velocityX = UFO_SPEED * direction;
       }
 
       if (state.ufo) {
           state.ufo.pos.x += (state.ufo as any).velocityX;
-          // Despawn
           if ((state.ufo.pos.x > CANVAS_WIDTH + 60) || (state.ufo.pos.x < -60)) {
               state.ufo = null;
           }
       }
 
-      // Alien Movement
+      // Alien Movement Logic
       let hitEdge = false;
       const activeAliens = state.aliens.filter(a => a.active);
       
       if (activeAliens.length === 0) {
           setStatus(GameStatus.VICTORY);
-          onLog("System: All targets eliminated. Mission Accomplished.");
+          onLog("System: SECTOR CLEARED. EXCELLENT WORK.");
           return;
       }
 
-      activeAliens.forEach(a => {
-        a.pos.x += state.alienSpeed * state.alienDirection;
-        if (a.pos.x <= 10 || a.pos.x >= CANVAS_WIDTH - 40) {
-          hitEdge = true;
-        }
-      });
+      const fractionRemaining = state.totalAliens > 0 ? activeAliens.length / state.totalAliens : 0;
 
-      if (hitEdge) {
-        state.alienDirection *= -1;
-        state.aliens.forEach(a => a.pos.y += ALIEN_DROP);
-        state.alienSpeed += 0.05;
-        
-        // Check invasion
-        if (activeAliens.some(a => a.pos.y + a.height >= state.player.pos.y)) {
-           setStatus(GameStatus.GAME_OVER);
-           onLog("System: CRITICAL FAILURE. Invasion successful.");
-        }
+      // --- MOVEMENT LOGIC SWITCH ---
+      if (state.chaosMode) {
+          // CHAOS MODE: Glide randomly down with swooping
+          activeAliens.forEach(a => {
+              const alien = a as any;
+              // Initialize drift props if needed
+              if (!alien.fallSpeed) {
+                  alien.fallSpeed = 1.0 + Math.random() * 3.0;
+                  // Slower frequency for wider, smoother swoops (0.001 - 0.003)
+                  alien.driftFreq = 0.001 + Math.random() * 0.003; 
+                  alien.driftOffset = Math.random() * Math.PI * 2;
+                  // Larger amplitude for velocity (sway speed)
+                  alien.driftAmp = 4 + Math.random() * 4; 
+                  // Add a constant drift bias
+                  alien.vxBias = (Math.random() - 0.5) * 2;
+              }
+
+              // Move down
+              a.pos.y += alien.fallSpeed;
+              
+              // Swooping motion (Sinusoidal velocity + Bias)
+              const osc = Math.sin(now * alien.driftFreq + alien.driftOffset) * alien.driftAmp;
+              a.pos.x += osc + alien.vxBias;
+
+              // Bounce off walls
+              if (a.pos.x <= 0) {
+                  a.pos.x = 0;
+                  alien.vxBias = Math.abs(alien.vxBias); 
+                  alien.driftOffset += Math.PI; // Flip phase
+              } else if (a.pos.x >= CANVAS_WIDTH - a.width) {
+                  a.pos.x = CANVAS_WIDTH - a.width;
+                  alien.vxBias = -Math.abs(alien.vxBias);
+                  alien.driftOffset += Math.PI;
+              }
+
+              // Die if they hit bottom
+              if (a.pos.y > CANVAS_HEIGHT) {
+                  a.active = false;
+                  createExplosion(a.pos.x, CANVAS_HEIGHT - 10, a.color);
+              }
+          });
+
+          // Check Collision with Player (Fatal)
+          const playerHit = activeAliens.some(a => 
+              a.active &&
+              a.pos.x < state.player.pos.x + state.player.width &&
+              a.pos.x + a.width > state.player.pos.x &&
+              a.pos.y < state.player.pos.y + state.player.height &&
+              a.pos.y + a.height > state.player.pos.y
+          );
+
+          if (playerHit) {
+              setStatus(GameStatus.GAME_OVER);
+              onLog("System: IMPACT DETECTED. HULL COMPROMISED.");
+              createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
+          }
+
+      } else if (fractionRemaining >= 0.5) {
+          // Standard Grid Movement (>= 50%)
+          activeAliens.forEach(a => {
+            a.pos.x += state.alienSpeed * state.alienDirection;
+            if (a.pos.x <= 10 || a.pos.x >= CANVAS_WIDTH - 40) {
+              hitEdge = true;
+            }
+          });
+
+          if (hitEdge) {
+            state.alienDirection *= -1;
+            state.aliens.forEach(a => a.pos.y += ALIEN_DROP);
+          }
+
+          // Normal Invasion Check
+          if (activeAliens.some(a => a.pos.y + a.height >= state.player.pos.y)) {
+             setStatus(GameStatus.GAME_OVER);
+             onLog("System: PERIMETER BREACHED. SYSTEM CRITICAL.");
+          }
+
+      } else {
+          // Swarm Movement (< 50%) - UPPER 66% ZONE
+          activeAliens.forEach(a => {
+             const alien = a as any;
+             if (typeof alien.vx !== 'number') {
+                 alien.vx = (Math.random() - 0.5) * state.alienSpeed * 4;
+                 alien.vy = (Math.random() - 0.5) * state.alienSpeed * 4;
+             }
+
+             let fx = 0;
+             let fy = 0; 
+
+             // Separation
+             activeAliens.forEach(other => {
+                 if (other === a) return;
+                 const dx = a.pos.x - other.pos.x;
+                 const dy = a.pos.y - other.pos.y;
+                 const dist = Math.sqrt(dx*dx + dy*dy);
+                 const safeDist = 45; 
+                 if (dist < safeDist && dist > 0) {
+                     const pushFactor = (safeDist - dist) / safeDist;
+                     fx += (dx / dist) * pushFactor * 0.8;
+                     fy += (dy / dist) * pushFactor * 0.8;
+                 }
+             });
+
+             // Boundaries
+             const MARGIN = 30;
+             const UPPER_ZONE_LIMIT = CANVAS_HEIGHT * 0.66; // Approx 330px (66%)
+
+             if (a.pos.x < MARGIN) fx += 0.4;
+             if (a.pos.x > CANVAS_WIDTH - MARGIN) fx -= 0.4;
+             
+             if (a.pos.y < MARGIN) fy += 0.4;
+             if (a.pos.y > UPPER_ZONE_LIMIT) fy -= 0.4;
+
+             fx += (Math.random() - 0.5) * 0.25;
+             fy += (Math.random() - 0.5) * 0.25;
+
+             alien.vx += fx;
+             alien.vy += fy;
+
+             const speedCap = state.alienSpeed * 2.5; 
+             const currentSpeed = Math.sqrt(alien.vx*alien.vx + alien.vy*alien.vy);
+             
+             if (currentSpeed > speedCap) {
+                 alien.vx = (alien.vx / currentSpeed) * speedCap;
+                 alien.vy = (alien.vy / currentSpeed) * speedCap;
+             }
+             if (currentSpeed < state.alienSpeed * 0.5) {
+                 alien.vx *= 1.05;
+                 alien.vy *= 1.05;
+             }
+
+             a.pos.x += alien.vx;
+             a.pos.y += alien.vy;
+          });
+
+          // Normal Invasion Check
+          if (activeAliens.some(a => a.pos.y + a.height >= state.player.pos.y)) {
+             setStatus(GameStatus.GAME_OVER);
+             onLog("System: PERIMETER BREACHED. SYSTEM CRITICAL.");
+          }
       }
 
       // --- ALIEN SHOOTING LOGIC ---
       if (state.attackCooldown > 0) state.attackCooldown--;
 
       const fireEnemyBullet = (alien: Alien, colorOverride?: string, speedMult: number = 0.5, symbolOverride?: string) => {
-           // Default values based on species
            let speed = BULLET_SPEED * speedMult;
            let sym = symbolOverride || '!';
            let col = colorOverride || alien.color;
 
            if (alien.species === 'VANGUARD') {
-               speed = BULLET_SPEED * 0.8; // Vanguards shoot fast
+               speed = BULLET_SPEED * 0.8; 
                sym = '|';
            } else if (alien.species === 'DREADNOUGHT') {
-               speed = BULLET_SPEED * 0.4; // Dreadnoughts shoot slow heavy shots
+               speed = BULLET_SPEED * 0.4; 
                sym = '*';
-               col = '#ff00ff';
+               col = PALETTE.WHITE;
            }
 
            state.bullets.push({
@@ -321,51 +550,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       };
 
       if (activeAliens.length > 0) {
-          // 1. Random Pot-shots (Vanguards are more aggressive)
           if (Math.random() < 0.01) {
              const shooter = activeAliens[Math.floor(Math.random() * activeAliens.length)];
-             // Vanguards have double chance to actually fire when picked
              if (shooter.species === 'VANGUARD' || Math.random() > 0.5) {
                  fireEnemyBullet(shooter);
              }
           }
 
-          // 2. Structured Attack Patterns
           if (state.attackCooldown <= 0) {
               const pattern = Math.random();
               
               if (pattern < 0.3) {
-                  // TARGETED LOCK (Prioritize Dreadnoughts for heavy hits)
                   const playerX = state.player.pos.x + state.player.width / 2;
                   const closest = activeAliens.reduce((prev, curr) => {
                       return (Math.abs((curr.pos.x + curr.width/2) - playerX) < Math.abs((prev.pos.x + prev.width/2) - playerX)) ? curr : prev;
                   });
-                  fireEnemyBullet(closest, '#ffaa00', 0.7, 'V');
-                  onLog(`System: WARN - Precision shot from ${closest.species}`);
+                  fireEnemyBullet(closest, PALETTE.RED, 0.7, 'V');
+                  onLog(`System: TARGETING LOCKED by ${closest.species}`);
               } 
               else if (pattern < 0.6) {
-                  // VOLLEY: 3 Random Aliens
                   const count = Math.min(activeAliens.length, 3);
                   const shooters = [...activeAliens].sort(() => 0.5 - Math.random()).slice(0, count);
                   shooters.forEach(s => fireEnemyBullet(s)); 
-                  onLog("System: ALERT - Volley Fire Incoming");
+                  onLog("System: ALERT - PLASMA SURGE");
               }
               else if (pattern < 0.85) {
-                  // FLANK
                   const sorted = [...activeAliens].sort((a, b) => a.pos.x - b.pos.x);
                   if (sorted.length >= 2) {
-                      fireEnemyBullet(sorted[0], '#00ffff', 0.6, '/');
-                      fireEnemyBullet(sorted[sorted.length-1], '#00ffff', 0.6, '\\');
+                      fireEnemyBullet(sorted[0], PALETTE.ELECTRIC_BLUE, 0.6, '/');
+                      fireEnemyBullet(sorted[sorted.length-1], PALETTE.ELECTRIC_BLUE, 0.6, '\\');
                   }
               }
               else {
-                   // SATURATION: (Prefer Vanguards)
                    activeAliens.forEach(a => {
                        let chance = 0.1;
                        if (a.species === 'VANGUARD') chance = 0.25;
-                       if (Math.random() < chance) fireEnemyBullet(a, '#ff4444', 0.5, '|');
+                       if (Math.random() < chance) fireEnemyBullet(a, PALETTE.YELLOW, 0.5, '|');
                    });
-                   onLog("System: DANGER - Saturation Fire");
+                   onLog("System: DANGER - BARRAGE INCOMING");
               }
 
               state.attackCooldown = 80 + Math.floor(Math.random() * 80);
@@ -382,13 +604,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           ) {
               b.active = false;
               setStatus(GameStatus.GAME_OVER);
-              onLog("System: PLAYER DESTROYED. GAME OVER.");
-              createExplosion(state.player.pos.x, state.player.pos.y, '#00ff00');
+              onLog("System: CRITICAL MALFUNCTION. SIGNAL LOST.");
+              createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
           }
       });
 
       state.bullets = state.bullets.filter(b => b.active);
       updateParticles();
+      updateLightning();
     };
 
     const updateParticles = () => {
@@ -396,107 +619,269 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         state.particles.forEach(p => {
             p.pos.x += p.velocity.x;
             p.pos.y += p.velocity.y;
-            p.life -= 0.05;
+            
+            // Friction/Drag to simulate atmosphere
+            p.velocity.x *= 0.92;
+            p.velocity.y *= 0.92;
+            
+            p.life -= 0.025;
             if (p.life <= 0) p.active = false;
         });
         state.particles = state.particles.filter(p => p.active);
     }
 
-    const createExplosion = (x: number, y: number, color: string) => {
-        for (let i = 0; i < 8; i++) {
-            gameState.current.particles.push({
-                pos: {x, y},
-                velocity: {
-                    x: (Math.random() - 0.5) * 4,
-                    y: (Math.random() - 0.5) * 4
-                },
+    const updateLightning = () => {
+        const state = gameState.current;
+        state.lightning.forEach(l => l.life -= 0.05); // Lasts ~20 frames
+        state.lightning = state.lightning.filter(l => l.life > 0);
+    }
+
+    const createLightningStorm = (startX: number, startY: number, targets: Alien[]) => {
+        const bolts: Lightning[] = [];
+        targets.forEach(target => {
+            const endX = target.pos.x + target.width/2;
+            const endY = target.pos.y + target.height/2;
+            
+            const segments = 6;
+            const path = [{x: startX, y: startY}];
+            
+            for(let i=1; i < segments; i++) {
+                const t = i/segments;
+                const mx = startX + (endX - startX) * t;
+                const my = startY + (endY - startY) * t;
+                // Jitter
+                path.push({
+                    x: mx + (Math.random() - 0.5) * 40, 
+                    y: my + (Math.random() - 0.5) * 40
+                });
+            }
+            path.push({x: endX, y: endY});
+            
+            bolts.push({
+                path,
                 life: 1.0,
+                color: '#ffffff'
+            });
+        });
+        gameState.current.lightning = bolts;
+    }
+
+    const createMuzzleFlash = (x: number, y: number) => {
+        // Burst of small, bright particles
+        for (let i = 0; i < 6; i++) {
+            gameState.current.particles.push({
+                pos: { x: x + (Math.random() - 0.5) * 6, y: y + (Math.random() - 0.5) * 4 },
+                velocity: {
+                    x: (Math.random() - 0.5) * 5,
+                    y: (Math.random() - 0.5) * 5
+                },
+                life: 0.3, // Very short life
                 active: true,
                 width: 2,
                 height: 2,
-                symbol: '.',
-                color: color
+                symbol: '●',
+                color: Math.random() > 0.5 ? PALETTE.WHITE : PALETTE.YELLOW
             });
         }
+        // Center Flash
+        gameState.current.particles.push({
+            pos: { x: x - 3, y: y - 3 },
+            velocity: { x: 0, y: 0 },
+            life: 0.1,
+            active: true,
+            width: 6,
+            height: 6,
+            symbol: '☼',
+            color: '#fff'
+        });
     }
+
+    const createExplosion = (x: number, y: number, color: string, isMassive: boolean = false) => {
+        const particleCount = isMassive ? 120 : 20;
+        
+        // Shockwave / Core
+        gameState.current.particles.push({
+            pos: { x, y },
+            velocity: { x: 0, y: 0 },
+            life: isMassive ? 2.0 : 1.0,
+            active: true,
+            width: isMassive ? 60 : 15,
+            height: isMassive ? 60 : 15,
+            symbol: '💥', // Special char for core
+            color: '#FFF'
+        });
+
+        for (let i = 0; i < particleCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * (isMassive ? 15 : 6);
+            
+            // Multicolor for massive explosions
+            const pColor = isMassive 
+                ? [PALETTE.RED, PALETTE.ORANGE, PALETTE.YELLOW, PALETTE.PURPLE, PALETTE.WHITE][Math.floor(Math.random()*5)]
+                : (Math.random() > 0.3 ? color : PALETTE.WHITE);
+
+            gameState.current.particles.push({
+                pos: { x, y },
+                velocity: {
+                    x: Math.cos(angle) * speed,
+                    y: Math.sin(angle) * speed
+                },
+                life: isMassive ? (2.0 + Math.random()) : (0.8 + Math.random() * 0.6),
+                active: true,
+                width: Math.random() > 0.5 ? 3 : 2,
+                height: Math.random() > 0.5 ? 3 : 2,
+                symbol: Math.random() > 0.7 ? (isMassive ? '#' : '*') : '.',
+                color: pColor
+            });
+        }
+    };
 
     const draw = (ctx: CanvasRenderingContext2D) => {
       const state = gameState.current;
       ctx.font = '16px "Fira Code"';
       ctx.textBaseline = 'top';
 
-      // Player
-      ctx.fillStyle = state.player.color;
-      ctx.fillText(state.player.symbol, state.player.pos.x, state.player.pos.y);
+      // Helper: Multi-layered Neon Bloom
+      // Draws text 3 times with varying blur to simulate neon light
+      const drawNeonText = (text: string, x: number, y: number, color: string) => {
+          ctx.shadowColor = color;
+          ctx.fillStyle = color;
+          
+          // Layer 1: Wide Soft Glow (Ambient)
+          ctx.shadowBlur = 20;
+          ctx.fillText(text, x, y);
+          
+          // Layer 2: Tight Intense Glow (Definition)
+          ctx.shadowBlur = 6;
+          ctx.fillText(text, x, y);
+          
+          // Layer 3: Core (Sharpness)
+          ctx.shadowBlur = 0;
+          ctx.fillText(text, x, y);
+      };
 
-      // Aliens
+      // Player (Neon Cyan)
+      drawNeonText(state.player.symbol, state.player.pos.x, state.player.pos.y, state.player.color);
+
+      // Aliens (Mixed Palette)
       state.aliens.filter(a => a.active).forEach(a => {
-        ctx.fillStyle = a.color;
-        ctx.fillText(a.symbol, a.pos.x, a.pos.y);
+        drawNeonText(a.symbol, a.pos.x, a.pos.y, a.color);
       });
 
-      // UFO
+      // Lightning (Behind UFO, In Front of Aliens)
+      drawLightning(ctx);
+
+      // UFO (Red/Pink)
       if (state.ufo && state.ufo.active) {
-          ctx.fillStyle = state.ufo.color;
-          ctx.fillText(state.ufo.symbol, state.ufo.pos.x, state.ufo.pos.y);
+          drawNeonText(state.ufo.symbol, state.ufo.pos.x, state.ufo.pos.y, state.ufo.color);
       }
 
       // Bullets
+      const time = Date.now();
       state.bullets.forEach(b => {
-        ctx.fillStyle = b.color;
-        ctx.fillText(b.symbol, b.pos.x, b.pos.y);
+        // Bullets use the standard neon renderer but we can modulate opacity/color elsewhere if needed
+        drawNeonText(b.symbol, b.pos.x, b.pos.y, b.color);
       });
 
       // Particles
       state.particles.forEach(p => {
+          ctx.shadowBlur = p.life * 15;
+          ctx.shadowColor = p.color;
           ctx.fillStyle = p.color;
-          ctx.globalAlpha = p.life;
-          ctx.fillText(p.symbol, p.pos.x, p.pos.y);
+          ctx.globalAlpha = Math.max(0, p.life); 
+          
+          // Check if it's a "core" explosion particle
+          if (p.symbol === '💥') {
+             // Flash effect
+             if (Math.random() > 0.5) {
+                 ctx.font = `${p.width}px "Fira Code"`;
+                 ctx.fillText(p.symbol, p.pos.x - (p.width/2), p.pos.y - (p.height/2));
+             }
+          } else {
+             // Scale text based on life - shrinking effect
+             const size = Math.max(10, p.width * 4 * p.life);
+             ctx.font = `${size}px "Fira Code"`; 
+             ctx.fillText(p.symbol, p.pos.x, p.pos.y);
+          }
+          
           ctx.globalAlpha = 1.0;
+          ctx.font = '16px "Fira Code"'; // Reset font
       });
+
+      // Reset shadow properties
+      ctx.shadowBlur = 0;
     };
 
+    const drawLightning = (ctx: CanvasRenderingContext2D) => {
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        gameState.current.lightning.forEach(bolt => {
+            // Pass 1: Wide Glow
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(255, 255, 255, ${bolt.life * 0.6})`;
+            ctx.lineWidth = 3 + Math.random() * 2;
+            ctx.shadowBlur = 25;
+            ctx.shadowColor = '#fff';
+            
+            if (bolt.path.length > 0) {
+                ctx.moveTo(bolt.path[0].x, bolt.path[0].y);
+                for(let i=1; i<bolt.path.length; i++) {
+                    ctx.lineTo(bolt.path[i].x, bolt.path[i].y);
+                }
+            }
+            ctx.stroke();
+
+            // Pass 2: Tight Core
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(255, 255, 255, ${bolt.life})`;
+            ctx.lineWidth = 1;
+            ctx.shadowBlur = 5;
+            
+             if (bolt.path.length > 0) {
+                ctx.moveTo(bolt.path[0].x, bolt.path[0].y);
+                for(let i=1; i<bolt.path.length; i++) {
+                    ctx.lineTo(bolt.path[i].x, bolt.path[i].y);
+                }
+            }
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
     const drawMenu = (ctx: CanvasRenderingContext2D) => {
-        ctx.fillStyle = '#00ff00';
+        ctx.shadowBlur = 40;
+        ctx.shadowColor = PALETTE.PINK;
+        ctx.fillStyle = PALETTE.PINK;
         ctx.font = '24px "Fira Code"';
         ctx.textAlign = 'center';
         ctx.fillText("PY_SPACE_INVADERS.EXE", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 3);
         
+        ctx.shadowBlur = 10;
         ctx.font = '14px "Fira Code"';
-        ctx.fillStyle = '#cccccc';
-        ctx.fillText("Press [ENTER] to Initialize", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+        ctx.fillStyle = PALETTE.CYAN;
+        ctx.fillText("INSERT COIN / PRESS [ENTER]", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
         
-        ctx.fillStyle = '#555';
+        ctx.fillStyle = '#aaa';
         ctx.font = '10px "Fira Code"';
-        ctx.fillText("v1.1.0 | Types: Dreadnought, Destroyer, Vanguard", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
-    };
-
-    const drawGameOver = (ctx: CanvasRenderingContext2D) => {
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        
-        ctx.fillStyle = '#ff0000';
-        ctx.font = '30px "Fira Code"';
-        ctx.textAlign = 'center';
-        ctx.fillText("GAME OVER", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
-        
-        ctx.fillStyle = '#fff';
-        ctx.font = '14px "Fira Code"';
-        ctx.fillText("Press [ENTER] to Restart", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+        ctx.fillText("v1.3-NEON_DREAM | SYSTEM: ONLINE", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
     };
 
     const drawVictory = (ctx: CanvasRenderingContext2D) => {
-        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillStyle = 'rgba(13, 2, 33, 0.8)';
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
         
-        ctx.fillStyle = '#00ff00';
+        ctx.shadowBlur = 50;
+        ctx.shadowColor = PALETTE.ELECTRIC_BLUE;
+        ctx.fillStyle = PALETTE.ELECTRIC_BLUE;
         ctx.font = '30px "Fira Code"';
         ctx.textAlign = 'center';
-        ctx.fillText("VICTORY!", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+        ctx.fillText("RADICAL!", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
         
+        ctx.shadowBlur = 0;
         ctx.fillStyle = '#fff';
         ctx.font = '14px "Fira Code"';
-        ctx.fillText("Mission Success. Press [ENTER] to Re-deploy", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
+        ctx.fillText("Sector Clear. [ENTER] to Continue", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 20);
     };
 
     animationFrameId = requestAnimationFrame(render);
@@ -517,7 +902,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   }, [status, setStatus]);
 
   return (
-    <div className="relative border-2 border-gray-700 bg-black rounded-sm shadow-[0_0_15px_rgba(0,255,0,0.2)]">
+    <div className="relative border-2 border-cyan-500/40 bg-[#050010] rounded-sm shadow-[0_0_50px_rgba(0,243,255,0.3)] overflow-hidden" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
       <canvas
         ref={canvasRef}
         width={CANVAS_WIDTH}
@@ -525,6 +910,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         className="block"
         style={{ cursor: 'none' }}
       />
+
+      {/* GAME OVER OVERLAY */}
+      {status === GameStatus.GAME_OVER && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-20 p-4 pointer-events-auto">
+            <h1 className="text-red-500 font-bold text-4xl mb-4 text-glow-strong font-mono animate-pulse">SYSTEM FAILURE</h1>
+            <p className="text-gray-400 text-xs animate-pulse">PRESS [ENTER] TO REBOOT SYSTEM</p>
+        </div>
+      )}
     </div>
   );
 };

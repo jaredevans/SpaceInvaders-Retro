@@ -1,12 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import { ChatMessage } from "../types";
 
-const getAI = () => {
-    if (!process.env.API_KEY) {
+const getAI = (apiKey?: string) => {
+    const key = apiKey || process.env.API_KEY;
+    if (!key) {
         console.warn("API_KEY not found in environment variables.");
         return null;
     }
-    return new GoogleGenAI({ apiKey: process.env.API_KEY });
+    return new GoogleGenAI({ apiKey: key });
 };
 
 export const generateConsoleResponse = async (
@@ -19,7 +20,6 @@ export const generateConsoleResponse = async (
   try {
     const model = 'gemini-2.5-flash';
     
-    // Construct a history-aware prompt or use chat history if using chat model (but here we'll use generateContent for simplicity with a specific persona)
     const systemInstruction = `
       You are PySys, a retro mainframe AI inside a Python terminal running a Space Invaders game.
       Your persona is technical, slightly robotic, but helpful.

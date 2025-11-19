@@ -20,6 +20,9 @@
                 text: '#33ff00',
                 dim: '#4a4a4a',
               }
+            },
+            animation: {
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
             }
           },
         },
@@ -44,6 +47,62 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #555;
+      }
+
+      /* CRT Effects */
+      .scanlines {
+        background: linear-gradient(
+          to bottom,
+          rgba(255,255,255,0),
+          rgba(255,255,255,0) 50%,
+          rgba(0,0,0,0.2) 50%,
+          rgba(0,0,0,0.2)
+        );
+        background-size: 100% 4px;
+        animation: scanlineMove 10s linear infinite;
+      }
+
+      .vignette {
+        background: radial-gradient(
+          circle,
+          rgba(0,0,0,0) 50%,
+          rgba(0,0,0,0.4) 90%,
+          rgba(0,0,0,0.8) 100%
+        );
+      }
+      
+      .crt-flicker {
+        animation: flicker 0.15s infinite;
+        pointer-events: none;
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.02);
+        opacity: 0;
+      }
+
+      @keyframes scanlineMove {
+        0% { background-position: 0 0; }
+        100% { background-position: 0 100%; }
+      }
+
+      @keyframes flicker {
+        0% { opacity: 0.02; }
+        5% { opacity: 0.05; }
+        10% { opacity: 0.01; }
+        15% { opacity: 0.05; }
+        25% { opacity: 0.02; }
+        50% { opacity: 0.01; }
+        80% { opacity: 0.05; }
+        100% { opacity: 0.02; }
+      }
+
+      /* Global Glow Utility */
+      .text-glow {
+        text-shadow: 0 0 5px currentColor, 0 0 10px currentColor;
+      }
+      
+      .text-glow-strong {
+        text-shadow: 0 0 5px currentColor, 0 0 10px currentColor, 0 0 20px currentColor;
       }
     </style>
   <script type="importmap">
