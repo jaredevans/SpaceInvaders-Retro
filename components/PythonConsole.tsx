@@ -16,30 +16,51 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
     if (bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs, history]);
+  }, [logs, history, isLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    const cleanInput = input.trim();
+    if (!cleanInput || isLoading) return;
 
-    const userMsg: ChatMessage = { role: 'user', text: input };
+    const userMsg: ChatMessage = { role: 'user', text: cleanInput };
     setHistory(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
 
-    // Check for hardcoded local commands first
-    if (input.trim().toLowerCase() === 'help') {
-      setTimeout(() => {
-        setHistory(prev => [...prev, { role: 'model', text: "Available commands: help, status, exit. Or ask me about the game code." }]);
-        setIsLoading(false);
-      }, 500);
-      return;
-    }
+    try {
+        // Local Commands
+        const lowerInput = cleanInput.toLowerCase();
+        if (lowerInput === 'help') {
+            setTimeout(() => {
+                setHistory(prev => [...prev, { role: 'model', text: "Commands: help, status, clear. Or ask about game mechanics." }]);
+                setIsLoading(false);
+            }, 300);
+            return;
+        }
+        if (lowerInput === 'status') {
+             setTimeout(() => {
+                setHistory(prev => [...prev, { role: 'model', text: "System: ONLINE. PySpace_Invaders.exe running. CPU: 12%." }]);
+                setIsLoading(false);
+            }, 300);
+            return;
+        }
+        if (lowerInput === 'clear') {
+            setHistory([]);
+            setIsLoading(false);
+            return;
+        }
 
-    const responseText = await generateConsoleResponse(history, input);
-    
-    setHistory(prev => [...prev, { role: 'model', text: responseText }]);
-    setIsLoading(false);
+        // AI Response
+        const responseText = await generateConsoleResponse(history, cleanInput);
+        setHistory(prev => [...prev, { role: 'model', text: responseText }]);
+
+    } catch (err) {
+        console.error(err);
+        setHistory(prev => [...prev, { role: 'model', text: "Error: Terminal Input Failure." }]);
+    } finally {
+        setIsLoading(false);
+    }
   };
 
   return (
@@ -65,12 +86,12 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
 
         {/* Chat History */}
         {history.map((msg, idx) => (
-          <div key={idx} className={`${msg.role === 'user' ? 'text-white' : 'text-lime-300'}`}>
+          <div key={`chat-${idx}`} className={`${msg.role === 'user' ? 'text-white mt-2' : 'text-lime-300'} break-words`}>
             {msg.role === 'user' ? `>>> ${msg.text}` : msg.text}
           </div>
         ))}
         
-        {isLoading && <div className="text-lime-500 animate-pulse">...</div>}
+        {isLoading && <div className="text-lime-500 animate-pulse mt-1">Processing...</div>}
         <div ref={bottomRef} />
       </div>
 
@@ -80,9 +101,10 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="flex-1 bg-transparent outline-none text-lime-100 placeholder-lime-800 text-glow caret-lime-500"
-          placeholder=""
+          className="flex-1 bg-transparent outline-none text-lime-100 placeholder-lime-700/50 focus:placeholder-transparent text-glow caret-lime-500"
+          placeholder="ask anything about game"
           autoFocus
+          disabled={isLoading}
         />
       </form>
     </div>
