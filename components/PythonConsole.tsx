@@ -4,9 +4,11 @@ import { generateConsoleResponse } from '../services/geminiService';
 
 interface PythonConsoleProps {
   logs: string[];
+  onFocus?: () => void;
+  onTriggerAttack?: () => void;
 }
 
-const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
+const PythonConsole: React.FC<PythonConsoleProps> = ({ logs, onFocus, onTriggerAttack }) => {
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -52,8 +54,12 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
         }
 
         // AI Response
-        const responseText = await generateConsoleResponse(history, cleanInput);
-        setHistory(prev => [...prev, { role: 'model', text: responseText }]);
+        const { text, action } = await generateConsoleResponse(history, cleanInput);
+        setHistory(prev => [...prev, { role: 'model', text: text }]);
+        
+        if (action === 'ATTACK' && onTriggerAttack) {
+            onTriggerAttack();
+        }
 
     } catch (err) {
         console.error(err);
@@ -66,6 +72,7 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
   return (
     <div 
       className="flex flex-col h-full bg-[#051105] text-lime-400 font-mono text-xs md:text-sm p-2 border-l border-lime-900/50 w-full md:w-80"
+      onClick={onFocus}
     >
       <div className="flex-1 overflow-y-auto space-y-1 mb-2 custom-scrollbar text-glow">
         <div className="text-lime-600 mb-4 opacity-80">
@@ -76,7 +83,7 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
         
         {/* System Logs from Game */}
         {logs.map((log, idx) => {
-            const isDanger = log.includes("MOTHERSHIP DOWN");
+            const isDanger = log.includes("MOTHERSHIP") || log.includes("WARNING");
             return (
                 <div key={`log-${idx}`} className={`${isDanger ? 'text-red-500 font-bold text-glow-strong' : 'text-green-600'} opacity-90 font-light`}>
                     {`>> ${log}`}
@@ -101,6 +108,7 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs }) => {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onFocus={onFocus}
           className="flex-1 bg-transparent outline-none text-lime-100 placeholder-lime-700/50 focus:placeholder-transparent text-glow caret-lime-500"
           placeholder="ask anything about game"
           disabled={isLoading}

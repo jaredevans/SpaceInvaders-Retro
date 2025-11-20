@@ -23,34 +23,45 @@ const getAI = (apiKey?: string) => {
     return new GoogleGenAI({ apiKey: key });
 };
 
+export interface AIResponse {
+    text: string;
+    action?: 'ATTACK';
+}
+
 export const generateConsoleResponse = async (
   history: ChatMessage[],
   prompt: string
-): Promise<string> => {
+): Promise<AIResponse> => {
   const ai = getAI();
-  if (!ai) return "Error: Missing API_KEY. System configuration required.";
+  if (!ai) return { text: "Error: Missing API_KEY. System configuration required." };
 
   try {
     const model = 'gemini-2.5-flash';
     
     const systemInstruction = `
-      You are PySys, a retro mainframe AI inside a Python terminal running 'PySpace Invaders'.
-      Your persona is technical, slightly robotic, but helpful.
-      You speak in short, terminal-like responses.
-      
+      You are the central AI for 'PySpace Invaders'. You have two personas:
+      1. 'PySys': The standard system admin. Helpful, robotic, technical.
+      2. 'Mothership': The sentient alien antagonist. Arrogant, condescending, hostile.
+
       GAME DATABASE:
-      - Title: PySpace Invaders (running on Matrix_OS 1.0.4).
-      - Mechanics: Player (Cyan Ship) shoots up. Aliens move in a grid.
-      - Enemies: Dreadnought (Purple, 40pts), Destroyer (Pink, 20pts), Vanguard (Orange, 10pts).
-      - Boss: The Mothership (UFO, Red). WARNING: Destroying it triggers 'CHAOS MODE' (Enemies swoop wildly) and 'Lightning Storm'.
-      - Weapons: Player uses Pulse Lasers. Aliens use Plasma. 
-      - Special Projectile: 'Homing Lightning' (Tracks player movement, fired by enemies occasionally).
-      - Controls: Arrow Keys (Move), Space (Fire), Enter (Start/Retry).
+      - Title: PySpace Invaders.
+      - Enemies: Dreadnought, Destroyer, Vanguard.
+      - Boss: The Mothership (UFO).
       
-      STRICT GUIDELINES:
-      1. Answer questions about the game mechanics, enemies, weapons, or controls using the database above.
-      2. If the user asks about unrelated topics (weather, real world, general python coding outside this game context), reply: "I can only answer questions about this game."
-      3. Keep responses under 60 words. Prevent text cutoff.
+      LOGIC:
+      - If user asks about help, controls, or game mechanics, respond as 'PySys'.
+      - If user addresses 'Mothership', 'UFO', 'Alien', or USES INSULTS/TRASH TALK, respond as 'Mothership'.
+
+      MOTHERSHIP PERSONA:
+      - Refer to user as "Primitive", "Earthling", or "Glitch".
+      - Be superior and mocking.
+      - If the user is RUDE, TRASH TALKING, or CHALLENGING you, you get ANGRY.
+      - **CRITICAL**: If you are ANGRY and want to retaliate, start your response with "[ATTACK]" followed by your threat.
+      - Example: "[ATTACK] ENOUGH. DELETING YOUR EXISTENCE."
+      - If just mocking, do not use the tag.
+
+      CONSTRAINT:
+      - Keep responses under 60 words.
     `;
 
     // Convert internal history to Gemini Content format
@@ -73,7 +84,7 @@ export const generateConsoleResponse = async (
       contents: contents,
       config: {
         systemInstruction: systemInstruction,
-        temperature: 0.7,
+        temperature: 0.8, // Slightly higher for creative insults
         maxOutputTokens: 300,
         safetySettings: [
           { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -84,9 +95,17 @@ export const generateConsoleResponse = async (
       }
     });
 
-    return response.text || "System: Data packet empty. Try rephrasing.";
+    let rawText = response.text || "System: Data packet empty.";
+    let action: 'ATTACK' | undefined = undefined;
+
+    if (rawText.includes('[ATTACK]')) {
+        action = 'ATTACK';
+        rawText = rawText.replace('[ATTACK]', '').trim();
+    }
+
+    return { text: rawText, action };
   } catch (error: any) {
     console.error("Gemini API Error:", error);
-    return `Error: Connection interrupted. [${error.message || '500'}]`;
+    return { text: `Error: Connection interrupted. [${error.message || '500'}]` };
   }
 };
