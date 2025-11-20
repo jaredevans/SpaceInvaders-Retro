@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage } from '../types';
 import { generateConsoleResponse } from '../services/geminiService';
@@ -110,7 +111,7 @@ const PythonConsole: React.FC<PythonConsoleProps> = ({ logs, onFocus, onTriggerA
           onChange={(e) => setInput(e.target.value)}
           onFocus={onFocus}
           className="flex-1 bg-transparent outline-none text-lime-100 placeholder-lime-700/50 focus:placeholder-transparent text-glow caret-lime-500"
-          placeholder="ask anything about game"
+          placeholder="taunt the mothership"
           disabled={isLoading}
         />
       </form>
