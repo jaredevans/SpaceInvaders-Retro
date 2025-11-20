@@ -3,6 +3,8 @@
 
 **PySpace Invaders** is a retro-styled arcade shooter running inside a simulated MacOS terminal environment. It combines classic Space Invaders gameplay with a "Cyberpunk/Outrun" aesthetic and a unique twist: a sentient AI Mothership powered by the Google Gemini API.
 
+<img src="https://i.imgur.com/Orzmzl4.png"/>
+
 ## 🎮 Features
 
 *   **Classic Arcade Gameplay:** Defeat waves of aliens descending upon your position.
