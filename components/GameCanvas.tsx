@@ -6,7 +6,7 @@ import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile } from '.
 const CANVAS_WIDTH = 600;
 const CANVAS_HEIGHT = 500;
 const PLAYER_SPEED = 4.84; 
-const BULLET_SPEED = 6.0; // Reduced from 8.0
+const BULLET_SPEED = 6.0;
 const ALIEN_SPEED_BASE = 0.67;
 const ALIEN_DROP = 20;
 const UFO_SPEED = 4.0;
@@ -262,8 +262,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         width: 8, height: 8,
         active: true,
         velocity: 0,
-        vx: xOffset < 0 ? -4.5 : 4.5, // Outward spread (reduced from 6)
-        vy: 3.0, // Downward (reduced from 4)
+        vx: xOffset < 0 ? -4.5 : 4.5,
+        vy: 3.0,
         isEnemy: true,
         symbol: '⚡',
         color: PALETTE.RED, // Angry color
@@ -477,7 +477,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       state.bullets.forEach(b => {
         if (b.type === 'HOMING_LIGHTNING') {
             if (b.phase === 'ASCEND') {
-                b.pos.y += b.vy || -4.5; // Reduced from -6
+                b.pos.y += b.vy || -4.5;
                 if (b.pos.y < 40) b.phase = 'HOME';
             } else {
                 const targetX = state.player.pos.x + state.player.width / 2;
@@ -488,7 +488,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                 const passedPlayer = b.pos.y > state.player.pos.y;
 
                 if (dist > 0 && !passedPlayer) {
-                    const speed = 7.5; // Reduced from 10.0
+                    const speed = 7.5;
                     const targetVx = (dx / dist) * speed;
                     const targetVy = (dy / dist) * speed;
                     const steer = 0.2; 
@@ -741,7 +741,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           const shooter = activeAliens[Math.floor(Math.random() * activeAliens.length)];
           state.bullets.push({
               pos: { x: shooter.pos.x + shooter.width/2, y: shooter.pos.y },
-              width: 8, height: 8, active: true, velocity: 0, vx: 0, vy: -4.5, // Reduced from -6
+              width: 8, height: 8, active: true, velocity: 0, vx: 0, vy: -4.5,
               isEnemy: true, symbol: '@', color: PALETTE.CYAN, type: 'HOMING_LIGHTNING', phase: 'ASCEND'
           });
           onLog("System: WARNING: HOMING PROJECTILE DETECTED");
