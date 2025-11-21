@@ -846,21 +846,47 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       // Draw Shield
       if (state.player.shield && state.player.shield > 0) {
         ctx.save();
-        const shieldOpacity = state.player.shield === 1 ? 0.3 : 0.6;
-        const pulse = Math.sin(Date.now() / 200) * 0.1;
-        ctx.strokeStyle = `rgba(0, 255, 0, ${shieldOpacity + pulse})`;
-        ctx.shadowColor = '#00ff00';
-        ctx.shadowBlur = 15;
-        ctx.lineWidth = 2;
-        
         const centerX = state.player.pos.x + state.player.width / 2;
         const centerY = state.player.pos.y + state.player.height / 2;
         
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, 25, 0, Math.PI * 2);
-        ctx.stroke();
+        // Neon Pulse Effect
+        const time = Date.now();
+        const pulse = Math.sin(time / 120) * 0.15; 
+        const baseAlpha = state.player.shield === 1 ? 0.4 : 0.9;
+        const alpha = Math.max(0.2, Math.min(1, baseAlpha + pulse));
         
+        // Layer 1: Broad outer glow (The atmosphere)
+        ctx.shadowBlur = 30;
+        ctx.shadowColor = '#00ff00';
+        ctx.strokeStyle = `rgba(0, 255, 0, ${alpha * 0.4})`;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 26, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Layer 2: Bright core stroke (The neon tube)
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ccffcc';
+        ctx.strokeStyle = `rgba(200, 255, 200, ${alpha})`; 
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 26, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Layer 3: Subtle field fill
+        ctx.fillStyle = `rgba(0, 255, 0, ${alpha * 0.08})`;
         ctx.shadowBlur = 0;
+        ctx.fill();
+
+        // Shield health indicator (Flicker intensely if low)
+        if (state.player.shield === 1 && Math.random() > 0.8) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 26, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
         ctx.restore();
       }
 
