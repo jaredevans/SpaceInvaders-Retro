@@ -65,7 +65,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   
   // Mutable game state (refs for performance in RAF loop)
   const gameState = useRef({
-    player: { pos: { x: CANVAS_WIDTH / 2 - 15, y: CANVAS_HEIGHT - 40 }, width: 30, height: 20, active: true, symbol: '_^_', color: PALETTE.CYAN } as Entity,
+    player: { pos: { x: CANVAS_WIDTH / 2 - 15, y: CANVAS_HEIGHT - 40 }, width: 30, height: 20, active: true, symbol: '_^_', color: PALETTE.CYAN, shield: 2 } as Entity,
     aliens: [] as Alien[],
     totalAliens: 0, // Track initial count for percentage calculations
     ufo: null as Alien | null,
@@ -149,6 +149,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     gameState.current.lightning = [];
     gameState.current.player.pos.x = CANVAS_WIDTH / 2 - 15;
     gameState.current.player.active = true;
+    gameState.current.player.shield = 2;
     gameState.current.alienSpeed = ALIEN_SPEED_BASE;
     gameState.current.attackCooldown = 60;
     gameState.current.chaosMode = false;
@@ -157,7 +158,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     gameState.current.playerCooldown = 0;
     setScore(0);
     onLog("System: Initializing Chromatic_Wave...");
-    onLog("System: Multi-spectrum targets detected.");
+    onLog("System: SHIELDS ONLINE (200%).");
   };
 
   // Focus on mount
@@ -806,9 +807,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             b.pos.y + b.height - hitBoxMargin > state.player.pos.y
           ) {
               b.active = false;
-              setStatus(GameStatus.GAME_OVER);
-              onLog("System: CRITICAL MALFUNCTION. SIGNAL LOST.");
-              createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
+              if (state.player.shield && state.player.shield > 0) {
+                  state.player.shield--;
+                  createExplosion(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2, '#00ff00');
+                  onLog(state.player.shield === 0 ? "System: SHIELD DEPLETED!" : "System: SHIELD ABSORBING IMPACT.");
+                  if (state.player.shield === 0) {
+                       createExplosion(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2, '#00FF00', true);
+                  }
+              } else {
+                  setStatus(GameStatus.GAME_OVER);
+                  onLog("System: CRITICAL MALFUNCTION. SIGNAL LOST.");
+                  createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
+              }
           }
       });
 
@@ -821,6 +831,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       const state = gameState.current;
       ctx.font = '16px "Fira Code"';
       ctx.textBaseline = 'top';
+      ctx.textAlign = 'left'; // Ensure alignment is reset from menu
 
       const drawNeonText = (text: string, x: number, y: number, color: string) => {
           ctx.shadowColor = color;
@@ -830,7 +841,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           ctx.shadowBlur = 0; ctx.fillText(text, x, y);
       };
 
-      drawNeonText(state.player.symbol, state.player.pos.x, state.player.pos.y, state.player.color);
+      drawNeonText(state.player.symbol, state.player.pos.x + 4.5, state.player.pos.y, state.player.color);
+      
+      // Draw Shield
+      if (state.player.shield && state.player.shield > 0) {
+        ctx.save();
+        const shieldOpacity = state.player.shield === 1 ? 0.3 : 0.6;
+        const pulse = Math.sin(Date.now() / 200) * 0.1;
+        ctx.strokeStyle = `rgba(0, 255, 0, ${shieldOpacity + pulse})`;
+        ctx.shadowColor = '#00ff00';
+        ctx.shadowBlur = 15;
+        ctx.lineWidth = 2;
+        
+        const centerX = state.player.pos.x + state.player.width / 2;
+        const centerY = state.player.pos.y + state.player.height / 2;
+        
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 25, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
+
       state.aliens.filter(a => a.active).forEach(a => { drawNeonText(a.symbol, a.pos.x, a.pos.y, a.color); });
       drawLightning(ctx);
       if (state.ufo && state.ufo.active) { drawNeonText(state.ufo.symbol, state.ufo.pos.x, state.ufo.pos.y, state.ufo.color); }
@@ -952,7 +985,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         else { ctx.fillText("INSERT COIN / PRESS [ENTER]", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); }
         ctx.fillStyle = '#aaa';
         ctx.font = '10px "Fira Code"';
-        ctx.fillText("v1.4-MOBILE-READY | SYSTEM: ONLINE", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
+        ctx.fillText("v1.5-SHIELD-UPGRADE | SYSTEM: ONLINE", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
     };
     
     const drawGameOver = (ctx: CanvasRenderingContext2D) => {

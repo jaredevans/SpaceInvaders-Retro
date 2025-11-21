@@ -19,6 +19,7 @@ export interface Entity {
   active: boolean;
   symbol: string;
   color: string;
+  shield?: number;
 }
 
 export type AlienSpecies = 'DREADNOUGHT' | 'DESTROYER' | 'VANGUARD' | 'MOTHERSHIP';
