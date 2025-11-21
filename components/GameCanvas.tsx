@@ -173,11 +173,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   const updateParticles = () => {
         const state = gameState.current;
         state.particles.forEach(p => {
-            p.pos.x += p.velocity.x;
-            p.pos.y += p.velocity.y;
-            p.velocity.x *= 0.92;
-            p.velocity.y *= 0.92;
-            p.life -= 0.031; 
+            if (p.symbol === 'SHIELD_BREAK') {
+                 p.life -= 0.025; 
+            } else {
+                p.pos.x += p.velocity.x;
+                p.pos.y += p.velocity.y;
+                p.velocity.x *= 0.92;
+                p.velocity.y *= 0.92;
+                p.life -= 0.031; 
+            }
             if (p.life <= 0) p.active = false;
         });
         state.particles = state.particles.filter(p => p.active);
@@ -251,6 +255,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                 color: pColor
             });
         }
+  };
+
+  const createShieldBreakEffect = (x: number, y: number) => {
+        gameState.current.particles.push({
+            pos: { x, y },
+            velocity: { x: 0, y: 0 },
+            life: 1.0,
+            active: true,
+            width: 0, height: 0,
+            symbol: 'SHIELD_BREAK',
+            color: '#00FF00'
+        });
   };
 
   const fireHomingMissile = (source: Alien, xOffset: number) => {
@@ -812,7 +828,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                   createExplosion(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2, '#00ff00');
                   onLog(state.player.shield === 0 ? "System: SHIELD DEPLETED!" : "System: SHIELD ABSORBING IMPACT.");
                   if (state.player.shield === 0) {
-                       createExplosion(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2, '#00FF00', true);
+                       createShieldBreakEffect(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2);
                   }
               } else {
                   setStatus(GameStatus.GAME_OVER);
@@ -950,6 +966,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       }
 
       state.particles.forEach(p => {
+          if (p.symbol === 'SHIELD_BREAK') {
+              ctx.save();
+              const maxLife = 1.0;
+              const progress = 1.0 - (p.life / maxLife);
+              const alpha = Math.max(0, p.life);
+              
+              // Expanding rings
+              const radius = 26 + (progress * 60);
+              
+              ctx.shadowBlur = 20 * alpha;
+              ctx.shadowColor = '#00ff00';
+              
+              // Outer Ring
+              ctx.beginPath();
+              ctx.arc(p.pos.x, p.pos.y, radius, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(0, 255, 0, ${alpha})`;
+              ctx.lineWidth = 3 * alpha;
+              ctx.stroke();
+              
+              // Inner Ripple
+              ctx.beginPath();
+              ctx.arc(p.pos.x, p.pos.y, radius * 0.7, 0, Math.PI * 2);
+              ctx.strokeStyle = `rgba(150, 255, 150, ${alpha * 0.5})`;
+              ctx.lineWidth = 1 * alpha;
+              ctx.stroke();
+              
+              ctx.restore();
+              return;
+          }
+
           ctx.shadowBlur = p.life * 15;
           ctx.shadowColor = p.color;
           ctx.fillStyle = p.color;
