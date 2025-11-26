@@ -1,43 +1,34 @@
 
 # PySpace Invaders
 
-**PySpace Invaders** is a retro-styled arcade shooter running inside a simulated MacOS terminal environment. It combines classic Space Invaders gameplay with a "Cyberpunk/Outrun" aesthetic and a unique twist: a sentient AI Mothership powered by the Google Gemini API.
+Retro-styled Space Invaders inside a faux terminal with neon Outrun vibes and a sentient AI mothership powered by Google Gemini.
 
-**Playable game here** https://pyspace-invaders-144953376104.us-west1.run.app
+**Play online:** https://pyspace-invaders-144953376104.us-west1.run.app
 
-<img src="https://i.imgur.com/Orzmzl4.png"/>
+<img src="https://i.imgur.com/Wl2CF0i.png"/>
 
-## 🎮 Features
+## Features
+- Classic arcade loop with rainbow alien formations, power-ups, and screen-shake effects.
+- Dual layout: desktop terminal window + mobile-friendly canvas with virtual joystick and auto-fire.
+- Python-style side console that logs game events and lets you chat with the AI.
+- Gemini-backed personas (System + Mothership) that taunt you and can trigger special attacks.
 
-*   **Classic Arcade Gameplay:** Defeat waves of aliens descending upon your position.
-*   **Sentient Mothership:** The UFO isn't just a bonus target. It watches the console logs. You can taunt it in the Python Console to trigger specific attack patterns!
-*   **Simulated Terminal OS:** The game runs inside a "windowed" environment with CRT scanlines, flicker effects, and neon glows.
-*   **Mobile Friendly:** Includes a virtual joystick for touch devices, making it playable on phones and tablets.
-*   **Particle Effects:** Dynamic explosions, lightning storms, and muzzle flashes.
+## Controls
+**Desktop:** Arrow keys move, Space fires, Enter starts/restarts, click the console to chat.  
+**Mobile:** Drag the virtual joystick to move, tap to fire/start (auto-fire enabled).
 
-## ⌨️ Controls
+## Local Setup
+Requires Node 18+ and npm.
 
-### Desktop
-*   **Arrow Left / Right:** Move Ship
-*   **Space:** Fire Laser
-*   **Enter:** Start Game / Resume / Retry
-*   **Mouse:** Click the Python Console to chat with the AI.
+1) Install deps: `npm install`  
+2) Add a Gemini key (for AI console replies): create `.env.local` with `GEMINI_API_KEY=your_key`  
+   - You can also export `API_KEY` before running if you prefer.  
+3) Start dev server: `npm run dev` (Vite, port 3000)  
+4) Build for production: `npm run build` then `npm run preview`
 
-### Mobile
-*   **Virtual Joystick:** Slide to move.
-*   **Tap Screen:** Fire / Start Game.
+Without a key the game still plays, but the console will only answer local commands (`help`, `status`, `clear`).
 
-## 🧠 AI Integration
-
-The game uses `@google/genai` to power the "System" and "Mothership" personas in the side console.
-*   **System:** Provides helpful info about the game state.
-*   **Mothership:** If you insult the aliens or the Mothership in the console, the AI may decide to retaliate by spawning the boss or launching special attacks!
-
-## 🛠️ Setup
-
-This project uses the Google GenAI SDK. You must provide an `API_KEY` in your environment variables for the chat features to work.
-
-```bash
-export API_KEY="your_gemini_api_key"
-npm start
-```
+## AI Console Notes
+- The console keeps a short chat history and sends it to Gemini (`@google/genai`).
+- Taunting the mothership or using insults may return `[ATTACK]` responses, which trigger in-game retaliation.
+- Safety settings are enabled, and replies are capped to keep them snappy.
