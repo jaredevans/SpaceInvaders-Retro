@@ -29,6 +29,13 @@ export interface Alien extends Entity {
   col: number;
   scoreValue: number;
   species: AlienSpecies;
+  behavior: 'FORMATION' | 'DIVING' | 'RETURNING';
+  diveProps?: {
+    t: number;
+    p0: Position;
+    p1: Position;
+    p2: Position;
+  };
 }
 
 export interface Projectile extends Entity {
@@ -39,11 +46,19 @@ export interface Projectile extends Entity {
   vy?: number;
   type?: 'STANDARD' | 'HOMING_LIGHTNING';
   phase?: 'ASCEND' | 'HOME';
+  piercing?: boolean; 
 }
 
 export interface Particle extends Entity {
   life: number;
   velocity: { x: number; y: number };
+}
+
+export type PowerUpType = 'SCATTER' | 'RAPID' | 'SHIELD' | 'LIGHTNING';
+
+export interface PowerUp extends Entity {
+  type: PowerUpType;
+  dy: number;
 }
 
 export interface ChatMessage {

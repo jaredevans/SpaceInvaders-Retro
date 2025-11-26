@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef } from 'react';
-import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile } from '../types';
+import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile, PowerUp, PowerUpType } from '../types';
 
 // Constants
 const CANVAS_WIDTH = 600;
@@ -10,6 +10,7 @@ const BULLET_SPEED = 6.0;
 const ALIEN_SPEED_BASE = 0.67;
 const ALIEN_DROP = 20;
 const UFO_SPEED = 4.0;
+const SHAKE_DECAY = 0.9;
 
 // Extended Outrun / Miami Vice Palette
 const PALETTE = {
@@ -22,7 +23,11 @@ const PALETTE = {
     WHITE: '#ffffff',
     LIME: '#ccff00',
     ELECTRIC_BLUE: '#2e2bfd',
-    HOT_MAGENTA: '#ff00cc'
+    HOT_MAGENTA: '#ff00cc',
+    POWERUP_SCATTER: '#00ffff',
+    POWERUP_RAPID: '#ff0055',
+    POWERUP_SHIELD: '#00ff00',
+    POWERUP_LIGHTNING: '#fff000'
 };
 
 // Alien Definitions with 80s colors
@@ -62,6 +67,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevStatus = useRef<GameStatus>(status);
+  const scoreRef = useRef(score); // Keep ref synced with score prop to access in effects without deps
+
+  // Keep scoreRef updated
+  useEffect(() => {
+      scoreRef.current = score;
+  }, [score]);
   
   // Mutable game state (refs for performance in RAF loop)
   const gameState = useRef({
@@ -73,6 +84,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     bullets: [] as Projectile[],
     particles: [] as Particle[],
     lightning: [] as Lightning[],
+    powerUps: [] as PowerUp[],
     stars: Array.from({ length: 120 }, () => {
         const colors = Object.values(PALETTE); // Use all colors for stars
         return {
@@ -91,11 +103,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     keys: { left: false, right: false, shoot: false, shootPressed: false },
     attackCooldown: 60,
     lastSpecialTime: 0, // Timer for special bullet
-    playerCooldown: 0 // For auto-fire
+    playerCooldown: 0, // For auto-fire
+    shotsFired: 0, // Track shots for super laser
+    screenShake: 0, // Current shake intensity
+    activePowerUp: null as { type: PowerUpType, endTime: number } | null,
+    ufoSpawnCount: 0,
+    highScores: JSON.parse(typeof localStorage !== 'undefined' ? (localStorage.getItem('pyspace_highscores') || '[]') : '[]') as number[]
   });
 
   // Initialize Aliens
-  const initGame = () => {
+  const initGame = (preserveScore: boolean = false) => {
     const rows = 5;
     const cols = 8;
     const aliens: Alien[] = [];
@@ -135,7 +152,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           scoreValue: typeDef.score,
           symbol: typeDef.symbol,
           color: rowColor, // Use row-specific color
-          species: species
+          species: species,
+          behavior: 'FORMATION'
         });
       }
     }
@@ -147,6 +165,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     gameState.current.bullets = [];
     gameState.current.particles = [];
     gameState.current.lightning = [];
+    gameState.current.powerUps = [];
     gameState.current.player.pos.x = CANVAS_WIDTH / 2 - 15;
     gameState.current.player.active = true;
     gameState.current.player.shield = 2;
@@ -156,9 +175,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     gameState.current.pauseUntil = 0;
     gameState.current.lastSpecialTime = Date.now();
     gameState.current.playerCooldown = 0;
-    setScore(0);
-    onLog("System: Initializing Chromatic_Wave...");
-    onLog("System: SHIELDS ONLINE (200%).");
+    gameState.current.shotsFired = 0;
+    gameState.current.screenShake = 0;
+    gameState.current.activePowerUp = null;
+    gameState.current.ufoSpawnCount = 0;
+    
+    if (!preserveScore) {
+        setScore(0);
+    }
+    
+    onLog(preserveScore ? "System: SECTOR ADVANCED. SHIELDS RECHARGED." : "System: Initializing Chromatic_Wave...");
+    if (!preserveScore) onLog("System: SHIELDS ONLINE (200%).");
   };
 
   // Focus on mount
@@ -170,6 +197,48 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
   // --- Helper Functions ---
   
+  const triggerShake = (amount: number) => {
+      gameState.current.screenShake = amount;
+  };
+
+  const spawnPowerUp = (x: number, y: number, forcedType?: PowerUpType) => {
+      let type: PowerUpType = 'SCATTER';
+      let symbol = '[S]';
+      let color = PALETTE.POWERUP_SCATTER;
+
+      if (forcedType) {
+          type = forcedType;
+          if (type === 'LIGHTNING') { symbol = '[⚡]'; color = PALETTE.POWERUP_LIGHTNING; }
+          else if (type === 'SHIELD') { symbol = '[+]'; color = PALETTE.POWERUP_SHIELD; }
+          else if (type === 'RAPID') { symbol = '[R]'; color = PALETTE.POWERUP_RAPID; }
+          else { symbol = '[S]'; color = PALETTE.POWERUP_SCATTER; }
+      } else {
+          const roll = Math.random();
+          if (roll < 0.4) {
+              type = 'SCATTER';
+              symbol = '[S]';
+              color = PALETTE.POWERUP_SCATTER;
+          } else if (roll < 0.7) {
+              type = 'RAPID';
+              symbol = '[R]';
+              color = PALETTE.POWERUP_RAPID;
+          } else {
+              type = 'SHIELD';
+              symbol = '[+]';
+              color = PALETTE.POWERUP_SHIELD;
+          }
+      }
+
+      gameState.current.powerUps.push({
+          pos: { x, y },
+          width: 20, height: 20,
+          active: true,
+          symbol, color,
+          type,
+          dy: 1.5
+      });
+  };
+
   const updateParticles = () => {
         const state = gameState.current;
         state.particles.forEach(p => {
@@ -209,7 +278,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             path.push({x: endX, y: endY});
             bolts.push({ path, life: 1.0, color: '#ffffff' });
         });
-        gameState.current.lightning = bolts;
+        // Append new bolts instead of replacing
+        gameState.current.lightning = [...gameState.current.lightning, ...bolts];
   }
 
   const createMuzzleFlash = (x: number, y: number) => {
@@ -234,8 +304,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         }
   }
 
-  const createExplosion = (x: number, y: number, color: string, isMassive: boolean = false) => {
+  const createExplosion = (x: number, y: number, color: string, isMassive: boolean = false, preventShake: boolean = false) => {
         const particleCount = isMassive ? 120 : 20;
+        
+        // Visual Juice: Screen Shake (unless disabled)
+        if (!preventShake) {
+             triggerShake(isMassive ? 25 : 4);
+        }
+
         gameState.current.particles.push({
             pos: { x, y }, velocity: { x: 0, y: 0 }, life: isMassive ? 2.0 : 1.0, active: true, width: isMassive ? 60 : 15, height: isMassive ? 60 : 15, symbol: '💥', color: '#FFF'
         });
@@ -267,6 +343,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             symbol: 'SHIELD_BREAK',
             color: '#00FF00'
         });
+        triggerShake(10);
   };
 
   const fireHomingMissile = (source: Alien, xOffset: number) => {
@@ -307,7 +384,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                 scoreValue: 500,
                 species: 'MOTHERSHIP',
                 symbol: 'Ò_Ó', // Angry face
-                color: PALETTE.RED
+                color: PALETTE.RED,
+                behavior: 'FORMATION'
             };
             (state.ufo as any).velocityX = UFO_SPEED * direction;
       } else {
@@ -336,9 +414,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
   }, [attackTrigger]);
 
   useEffect(() => {
+    // Save high score on Game Over
+    if (status === GameStatus.GAME_OVER) {
+         const currentScore = scoreRef.current;
+         const saved = JSON.parse(localStorage.getItem('pyspace_highscores') || '[]');
+         const newScores = [...saved, currentScore].sort((a: number, b: number) => b - a).slice(0, 3);
+         localStorage.setItem('pyspace_highscores', JSON.stringify(newScores));
+         gameState.current.highScores = newScores;
+    }
+
     // Only reset game if we are NOT coming from a PAUSED state
+    // AND if status is PLAYING (Game Started)
     if (status === GameStatus.PLAYING && prevStatus.current !== GameStatus.PAUSED) {
-      initGame();
+      // If we came from VICTORY, keep the score. Otherwise (MENU or GAME_OVER), reset it.
+      const preserveScore = prevStatus.current === GameStatus.VICTORY;
+      initGame(preserveScore);
     }
     
     if (status === GameStatus.PAUSED) {
@@ -393,9 +483,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     const render = () => {
       if (!ctx || !canvasRef.current) return;
 
+      // Visual Juice: Screen Shake application
+      const shake = gameState.current.screenShake;
+      let dx = 0, dy = 0;
+      if (shake > 0.5) {
+          dx = (Math.random() - 0.5) * shake;
+          dy = (Math.random() - 0.5) * shake;
+      }
+
+      ctx.save();
+      ctx.translate(dx, dy);
+
       // Background: Deep Dark Purple/Black
       ctx.fillStyle = '#050010'; 
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.fillRect(-dx, -dy, CANVAS_WIDTH, CANVAS_HEIGHT); // Fill bounds despite shake
       
       // Draw Stars (Background Layer)
       drawStars(ctx);
@@ -419,12 +520,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       } else if (status === GameStatus.GAME_OVER) {
         draw(ctx); // Draw frozen state
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillRect(-dx, -dy, CANVAS_WIDTH, CANVAS_HEIGHT);
         drawGameOver(ctx);
       } else if (status === GameStatus.VICTORY) {
         draw(ctx);
         drawVictory(ctx);
       }
+      
+      ctx.restore(); // Undo shake translation
 
       animationFrameId = requestAnimationFrame(render);
     };
@@ -451,6 +554,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     const update = () => {
       const state = gameState.current;
       const now = Date.now();
+      
+      // Decrease Shake
+      if (state.screenShake > 0) state.screenShake *= SHAKE_DECAY;
+      if (state.screenShake < 0.5) state.screenShake = 0;
+
+      // Handle PowerUp Expiration
+      if (state.activePowerUp && now > state.activePowerUp.endTime) {
+          state.activePowerUp = null;
+          onLog("System: POWER-UP OFFLINE.");
+      }
 
       // Mobile Input Handling
       if (isMobile && mobileInputRef) {
@@ -464,7 +577,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
           if (state.playerCooldown > 0) state.playerCooldown--;
           if (state.playerCooldown <= 0) {
              state.keys.shoot = true;
-             state.playerCooldown = 15; 
+             state.playerCooldown = state.activePowerUp?.type === 'RAPID' ? 7 : 15; // Rapid fire support
           }
       }
 
@@ -480,14 +593,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
       // Shooting
       if (state.keys.shoot) {
+        state.shotsFired++;
+        const isSuper = (state.shotsFired % 10 === 0);
         const bulletX = state.player.pos.x + state.player.width / 2 - 2;
         const bulletY = state.player.pos.y;
+        
         createMuzzleFlash(bulletX + 2, bulletY);
-        state.bullets.push({
-          pos: { x: bulletX, y: bulletY },
-          width: 4, height: 10, active: true, velocity: -BULLET_SPEED, isEnemy: false, symbol: '|', color: PALETTE.YELLOW
-        });
-        state.keys.shoot = false;
+        
+        // Scatter Powerup Logic
+        if (state.activePowerUp?.type === 'SCATTER' && !isSuper) {
+            [-1, 0, 1].forEach(dir => {
+                state.bullets.push({
+                    pos: { x: bulletX, y: bulletY },
+                    width: 4, height: 10, active: true, velocity: -BULLET_SPEED, isEnemy: false, symbol: '|', color: PALETTE.POWERUP_SCATTER,
+                    vx: dir * 1.5 // Horizontal spread
+                });
+            });
+        } else {
+             // Normal or Super Shot
+             state.bullets.push({
+                pos: { x: bulletX, y: bulletY },
+                width: isSuper ? 6 : 4, 
+                height: isSuper ? CANVAS_HEIGHT : 10, // Super laser is tall
+                active: true, 
+                velocity: isSuper ? -BULLET_SPEED * 2 : -BULLET_SPEED, 
+                isEnemy: false, 
+                symbol: isSuper ? '||' : '|', 
+                color: isSuper ? PALETTE.ELECTRIC_BLUE : PALETTE.YELLOW,
+                piercing: isSuper
+             });
+        }
+
+        if (isSuper) {
+            triggerShake(5);
+            onLog("System: SUPER LASER DISCHARGED");
+        }
+        
+        // Handle Cooldown for desktop manual fire (prevent rapid spam)
+        state.keys.shoot = false; 
       }
 
       // Update Bullets
@@ -526,9 +669,56 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             }
         } else {
             b.pos.y += b.velocity;
-            if (b.pos.y < 0 || b.pos.y > CANVAS_HEIGHT) b.active = false;
+            b.pos.x += b.vx || 0; // For scatter
+            // Check bounds (piercing bullets go off screen)
+            if (b.pos.y < -50 || b.pos.y > CANVAS_HEIGHT) b.active = false;
         }
       });
+      
+      // Update PowerUps
+      state.powerUps.forEach(p => {
+          p.pos.y += p.dy;
+          if (p.pos.y > CANVAS_HEIGHT) p.active = false;
+          
+          // Collision with Player
+          if (p.active && 
+              p.pos.x < state.player.pos.x + state.player.width &&
+              p.pos.x + p.width > state.player.pos.x &&
+              p.pos.y < state.player.pos.y + state.player.height &&
+              p.pos.y + p.height > state.player.pos.y) {
+              
+              p.active = false;
+              createExplosion(state.player.pos.x + 15, state.player.pos.y, p.color);
+              
+              if (p.type === 'SHIELD') {
+                  state.player.shield = 2; // Fully restore shields
+                  onLog("System: SHIELDS FULLY RESTORED.");
+                  state.activePowerUp = { type: p.type, endTime: now + 2000 };
+              } else if (p.type === 'SCATTER') {
+                  onLog("System: SCATTER SHOT ENABLED (10s)");
+                  state.activePowerUp = { type: p.type, endTime: now + 10000 };
+              } else if (p.type === 'RAPID') {
+                  onLog("System: RAPID FIRE ENABLED (10s)");
+                  state.activePowerUp = { type: p.type, endTime: now + 10000 };
+              } else if (p.type === 'LIGHTNING') {
+                  onLog("System: LIGHTNING OVERLOAD DISCHARGED.");
+                  const targets = state.aliens.filter(a => a.active);
+                  // Select up to 8 random targets
+                  const zapped = targets.sort(() => 0.5 - Math.random()).slice(0, 8);
+                  
+                  if (zapped.length > 0) {
+                    createLightningStorm(state.player.pos.x + 15, state.player.pos.y, zapped);
+                    zapped.forEach(z => {
+                        z.active = false;
+                        createExplosion(z.pos.x + z.width/2, z.pos.y + z.height/2, z.color, true); // Larger explosion
+                        setScore(s => s + z.scoreValue);
+                    });
+                    triggerShake(15);
+                  }
+              }
+          }
+      });
+      state.powerUps = state.powerUps.filter(p => p.active);
 
       // Collision: Player Bullet vs Aliens
       state.bullets.filter(b => !b.isEnemy && b.active).forEach(b => {
@@ -537,10 +727,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             b.pos.x < a.pos.x + a.width && b.pos.x + b.width > a.pos.x &&
             b.pos.y < a.pos.y + a.height && b.pos.y + b.height > a.pos.y
           ) {
-            b.active = false;
+            if (!b.piercing) b.active = false;
             a.active = false;
             setScore(prev => prev + a.scoreValue);
             createExplosion(a.pos.x + a.width/2, a.pos.y + a.height/2, a.color);
+            
+            // Drop PowerUp Chance (Reduced to 3%)
+            if (Math.random() < 0.03) {
+                spawnPowerUp(a.pos.x + a.width/2, a.pos.y);
+            }
           }
         });
 
@@ -550,15 +745,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             b.pos.x < ufo.pos.x + ufo.width && b.pos.x + b.width > ufo.pos.x &&
             b.pos.y < ufo.pos.y + ufo.height && b.pos.y + b.height > ufo.pos.y
           ) {
-            b.active = false;
+            if (!b.piercing) b.active = false;
             ufo.active = false;
             setScore(prev => prev + ufo.scoreValue);
             
             const centerX = ufo.pos.x + ufo.width/2;
             const centerY = ufo.pos.y + ufo.height/2;
             createExplosion(centerX, centerY, ufo.color, true);
-            const remainingAliens = state.aliens.filter(a => a.active);
-            createLightningStorm(centerX, centerY, remainingAliens);
+            
+            // Mothership Destruction Effect: Lightning to all aliens
+            const livingAliens = state.aliens.filter(a => a.active);
+            if (livingAliens.length > 0) {
+                createLightningStorm(centerX, centerY, livingAliens);
+            }
+            
+            triggerShake(25); // Violent shake on hit
             
             state.chaosMode = true;
             state.pauseUntil = Date.now() + 1500;
@@ -575,7 +776,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       if (state.ufo) {
           state.ufo.pos.x += (state.ufo as any).velocityX;
 
-          // Movement Logic: If attacking, patrol back and forth. If not, fly by.
+          // Drop logic: Only drop when not attacking (gliding), on every other pass (even count), and only once per pass
+          if (!state.mothershipSequence.active && 
+              state.ufoSpawnCount % 2 === 0 && 
+              !(state.ufo as any).hasDroppedItem && 
+              Math.random() < 0.02) {
+               spawnPowerUp(state.ufo.pos.x + state.ufo.width/2, state.ufo.pos.y + 20, 'LIGHTNING');
+               (state.ufo as any).hasDroppedItem = true;
+          }
+
+          // Movement Logic: If attacking, patrol bounce. If not, fly by.
           if (state.mothershipSequence.active) {
                // Patrol bounce logic
                if (state.ufo.pos.x > CANVAS_WIDTH - state.ufo.width - 10) {
@@ -595,6 +805,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       
       // Spawn random UFO if not chaos mode and no current UFO
       if (!state.chaosMode && !state.ufo && Math.random() < 0.0015) { 
+          state.ufoSpawnCount++; // Increment encounter count
           const direction = Math.random() > 0.5 ? 1 : -1;
           const startX = direction === 1 ? -50 : CANVAS_WIDTH + 10;
           state.ufo = {
@@ -604,18 +815,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
               scoreValue: 150,
               species: 'MOTHERSHIP',
               symbol: '<(^_^)>',
-              color: PALETTE.RED
+              color: PALETTE.RED,
+              behavior: 'FORMATION'
           };
           onLog("System: ALERT! High-velocity signature detected.");
           (state.ufo as any).velocityX = UFO_SPEED * direction;
+          (state.ufo as any).hasDroppedItem = false;
       }
 
       // Mothership Attack Sequence Logic
       if (state.mothershipSequence.active && state.ufo && state.ufo.active) {
           const elapsed = now - state.mothershipSequence.startTime;
           
-          // 1. Move back and forth for 7 seconds (handled in UFO movement above)
-          // 2. Fire first missile after 7 seconds
           if (state.mothershipSequence.missilesFired === 0 && elapsed > 7000) {
                fireHomingMissile(state.ufo, -10); // Left side fire
                state.mothershipSequence.missilesFired = 1;
@@ -623,11 +834,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                createExplosion(state.ufo.pos.x, state.ufo.pos.y + 20, PALETTE.RED); // Muzzle flash
                onLog("System: MOTHERSHIP FIRING PRIMARY!");
           }
-          // 3. Fire second missile 5 seconds later
           else if (state.mothershipSequence.missilesFired === 1 && now - state.mothershipSequence.lastMissileTime > 5000) {
                fireHomingMissile(state.ufo, state.ufo.width + 10); // Right side fire
                state.mothershipSequence.missilesFired = 2;
-               // Attack sequence complete, allow UFO to fly off screen (by disabling active sequence)
                state.mothershipSequence.active = false;
                createExplosion(state.ufo.pos.x + state.ufo.width, state.ufo.pos.y + 20, PALETTE.RED);
                onLog("System: MOTHERSHIP DISENGAGING.");
@@ -635,7 +844,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       }
 
       // Alien Movement Logic
-      let hitEdge = false;
       const activeAliens = state.aliens.filter(a => a.active);
       
       if (activeAliens.length === 0) {
@@ -645,6 +853,67 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
       }
 
       const fractionRemaining = state.totalAliens > 0 ? activeAliens.length / state.totalAliens : 0;
+
+      // Galaga-style Diving Logic trigger
+      // Chance increases as aliens decrease
+      const diveChance = 0.002 + (1 - fractionRemaining) * 0.005;
+      if (!state.chaosMode && Math.random() < diveChance) {
+           const candidates = activeAliens.filter(a => a.behavior === 'FORMATION' && a.species !== 'DREADNOUGHT');
+           if (candidates.length > 0) {
+               const diver = candidates[Math.floor(Math.random() * candidates.length)];
+               diver.behavior = 'DIVING';
+               
+               // Calculate Quadratic Curve: P0 (Start), P1 (Control), P2 (End)
+               const p0 = { ...diver.pos };
+               const p2 = { x: state.player.pos.x, y: CANVAS_HEIGHT + 50 };
+               // Control point dictates the curve. 
+               // Swing dictates left/right curve, but y must be high negative to loop UP first.
+               const swing = (Math.random() - 0.5) * 400;
+               // Control Point Y is way above screen to force upward loop
+               const p1 = { x: (p0.x + p2.x)/2 + swing, y: p0.y - 200 };
+
+               diver.diveProps = { t: 0, p0, p1, p2 };
+               onLog(`System: WARNING - ${diver.species} DIVING!`);
+           }
+      }
+
+      // Universal Diving Logic (Handles diving aliens regardless of game phase)
+      activeAliens.forEach(a => {
+        if (a.behavior === 'DIVING' && a.diveProps) {
+            // Execute Dive
+            a.diveProps.t += 0.007; // Reduced speed by ~50%
+            const t = a.diveProps.t;
+            const { p0, p1, p2 } = a.diveProps;
+            
+            // Quadratic Bezier Formula
+            const invT = 1 - t;
+            a.pos.x = invT * invT * p0.x + 2 * invT * t * p1.x + t * t * p2.x;
+            a.pos.y = invT * invT * p0.y + 2 * invT * t * p1.y + t * t * p2.y;
+
+            // Particle Trail
+            if (Math.random() > 0.5) {
+                gameState.current.particles.push({
+                    pos: { x: a.pos.x + a.width/2, y: a.pos.y },
+                    velocity: { x: 0, y: 0 },
+                    life: 0.3, active: true, width: 2, height: 2, symbol: '.', color: a.color
+                });
+            }
+
+            if (t >= 1 || a.pos.y > CANVAS_HEIGHT) {
+                // Loop back to formation
+                a.behavior = 'FORMATION';
+                a.pos.y = -40; // Teleport top
+                // Reset pos roughly
+                a.pos.x = 50 + a.col * 50; 
+                a.pos.y = 50 + a.row * 40;
+                
+                // Reset velocity in case we are in Scramble mode, so it re-initializes
+                const alien = a as any;
+                delete alien.vx;
+                delete alien.vy;
+            }
+        }
+      });
 
       if (state.chaosMode) {
           activeAliens.forEach(a => {
@@ -659,6 +928,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
               a.pos.y += alien.fallSpeed;
               const osc = Math.sin(now * alien.driftFreq + alien.driftOffset) * alien.driftAmp;
               a.pos.x += osc + alien.vxBias;
+              
+              // Bounce
               if (a.pos.x <= 0) {
                   a.pos.x = 0;
                   alien.vxBias = Math.abs(alien.vxBias); 
@@ -673,79 +944,95 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                   createExplosion(a.pos.x, CANVAS_HEIGHT - 10, a.color);
               }
           });
-          const playerHit = activeAliens.some(a => 
-              a.active &&
-              a.pos.x < state.player.pos.x + state.player.width &&
-              a.pos.x + a.width > state.player.pos.x &&
-              a.pos.y < state.player.pos.y + state.player.height &&
-              a.pos.y + a.height > state.player.pos.y
-          );
-          if (playerHit) {
-              setStatus(GameStatus.GAME_OVER);
-              onLog("System: IMPACT DETECTED. HULL COMPROMISED.");
-              createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
-          }
-
       } else if (fractionRemaining >= 0.5) {
+          // Formation Movement (Grid)
+          let hitEdge = false;
           activeAliens.forEach(a => {
-            a.pos.x += state.alienSpeed * state.alienDirection;
-            if (a.pos.x <= 10 || a.pos.x >= CANVAS_WIDTH - 40) hitEdge = true;
+            if (a.behavior === 'FORMATION') {
+                a.pos.x += state.alienSpeed * state.alienDirection;
+                if (a.pos.x <= 10 || a.pos.x >= CANVAS_WIDTH - 40) hitEdge = true;
+            }
           });
+
           if (hitEdge) {
             state.alienDirection *= -1;
-            state.aliens.forEach(a => a.pos.y += ALIEN_DROP);
-          }
-          if (activeAliens.some(a => a.pos.y + a.height >= state.player.pos.y)) {
-             setStatus(GameStatus.GAME_OVER);
-             onLog("System: PERIMETER BREACHED. SYSTEM CRITICAL.");
+            state.aliens.forEach(a => {
+                if (a.behavior === 'FORMATION') a.pos.y += ALIEN_DROP;
+            });
           }
       } else {
+          // Late Game Scramble behavior
           activeAliens.forEach(a => {
-             const alien = a as any;
-             if (typeof alien.vx !== 'number') {
-                 alien.vx = (Math.random() - 0.5) * state.alienSpeed * 4;
-                 alien.vy = (Math.random() - 0.5) * state.alienSpeed * 4;
-             }
-             let fx = 0, fy = 0; 
-             activeAliens.forEach(other => {
-                 if (other === a) return;
-                 const dx = a.pos.x - other.pos.x;
-                 const dy = a.pos.y - other.pos.y;
-                 const dist = Math.sqrt(dx*dx + dy*dy);
-                 const safeDist = 45; 
-                 if (dist < safeDist && dist > 0) {
-                     const pushFactor = (safeDist - dist) / safeDist;
-                     fx += (dx / dist) * pushFactor * 0.8;
-                     fy += (dy / dist) * pushFactor * 0.8;
+              if (a.behavior === 'FORMATION') { // Explicitly only apply to formation aliens
+                 const alien = a as any;
+                 if (typeof alien.vx !== 'number') {
+                     alien.vx = (Math.random() - 0.5) * state.alienSpeed * 4;
+                     alien.vy = (Math.random() - 0.5) * state.alienSpeed * 4;
                  }
-             });
-             const MARGIN = 30;
-             const UPPER_ZONE_LIMIT = CANVAS_HEIGHT * 0.66;
-             if (a.pos.x < MARGIN) fx += 0.4;
-             if (a.pos.x > CANVAS_WIDTH - MARGIN) fx -= 0.4;
-             if (a.pos.y < MARGIN) fy += 0.4;
-             if (a.pos.y > UPPER_ZONE_LIMIT) fy -= 0.4;
+                 let fx = 0, fy = 0; 
+                 activeAliens.forEach(other => {
+                     if (other === a) return;
+                     const dx = a.pos.x - other.pos.x;
+                     const dy = a.pos.y - other.pos.y;
+                     const dist = Math.sqrt(dx*dx + dy*dy);
+                     const safeDist = 45; 
+                     if (dist < safeDist && dist > 0) {
+                         const pushFactor = (safeDist - dist) / safeDist;
+                         fx += (dx / dist) * pushFactor * 0.8;
+                         fy += (dy / dist) * pushFactor * 0.8;
+                     }
+                 });
+                 const MARGIN = 30;
+                 const UPPER_ZONE_LIMIT = CANVAS_HEIGHT * 0.66;
+                 if (a.pos.x < MARGIN) fx += 0.4;
+                 if (a.pos.x > CANVAS_WIDTH - MARGIN) fx -= 0.4;
+                 if (a.pos.y < MARGIN) fy += 0.4;
+                 if (a.pos.y > UPPER_ZONE_LIMIT) fy -= 0.4;
 
-             fx += (Math.random() - 0.5) * 0.25;
-             fy += (Math.random() - 0.5) * 0.25;
-             alien.vx += fx;
-             alien.vy += fy;
-             const speedCap = state.alienSpeed * 2.5; 
-             const currentSpeed = Math.sqrt(alien.vx*alien.vx + alien.vy*alien.vy);
-             if (currentSpeed > speedCap) {
-                 alien.vx = (alien.vx / currentSpeed) * speedCap;
-                 alien.vy = (alien.vy / currentSpeed) * speedCap;
-             }
-             if (currentSpeed < state.alienSpeed * 0.5) {
-                 alien.vx *= 1.05;
-                 alien.vy *= 1.05;
-             }
-             a.pos.x += alien.vx;
-             a.pos.y += alien.vy;
+                 fx += (Math.random() - 0.5) * 0.25;
+                 fy += (Math.random() - 0.5) * 0.25;
+                 alien.vx += fx;
+                 alien.vy += fy;
+                 const speedCap = state.alienSpeed * 2.5; 
+                 const currentSpeed = Math.sqrt(alien.vx*alien.vx + alien.vy*alien.vy);
+                 if (currentSpeed > speedCap) {
+                     alien.vx = (alien.vx / currentSpeed) * speedCap;
+                     alien.vy = (alien.vy / currentSpeed) * speedCap;
+                 }
+                 a.pos.x += alien.vx;
+                 a.pos.y += alien.vy;
+              }
           });
-          if (activeAliens.some(a => a.pos.y + a.height >= state.player.pos.y)) {
+      }
+      
+      // Collision with player for any alien type
+      if (activeAliens.some(a => 
+          a.pos.x < state.player.pos.x + state.player.width &&
+          a.pos.x + a.width > state.player.pos.x &&
+          a.pos.y < state.player.pos.y + state.player.height &&
+          a.pos.y + a.height > state.player.pos.y
+      )) {
+          if (state.player.shield && state.player.shield > 0) {
+              // Ramming consumes shield, destroys alien
+              state.player.shield--;
+              // Find the alien and kill it
+              const rammer = activeAliens.find(a => 
+                  a.pos.x < state.player.pos.x + state.player.width &&
+                  a.pos.x + a.width > state.player.pos.x &&
+                  a.pos.y < state.player.pos.y + state.player.height &&
+                  a.pos.y + a.height > state.player.pos.y
+              );
+              if (rammer) {
+                  rammer.active = false;
+                  createExplosion(rammer.pos.x, rammer.pos.y, rammer.color);
+              }
+              triggerShake(10);
+              onLog(state.player.shield === 0 ? "System: IMPACT! SHIELD DOWN." : "System: IMPACT ABSORBED.");
+              if (state.player.shield === 0) createShieldBreakEffect(state.player.pos.x, state.player.pos.y);
+          } else {
              setStatus(GameStatus.GAME_OVER);
-             onLog("System: PERIMETER BREACHED. SYSTEM CRITICAL.");
+             onLog("System: CRITICAL HULL FAILURE.");
+             createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true, true);
           }
       }
 
@@ -826,6 +1113,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
               if (state.player.shield && state.player.shield > 0) {
                   state.player.shield--;
                   createExplosion(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2, '#00ff00');
+                  triggerShake(5);
                   onLog(state.player.shield === 0 ? "System: SHIELD DEPLETED!" : "System: SHIELD ABSORBING IMPACT.");
                   if (state.player.shield === 0) {
                        createShieldBreakEffect(state.player.pos.x + state.player.width/2, state.player.pos.y + state.player.height/2);
@@ -833,7 +1121,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
               } else {
                   setStatus(GameStatus.GAME_OVER);
                   onLog("System: CRITICAL MALFUNCTION. SIGNAL LOST.");
-                  createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true);
+                  createExplosion(state.player.pos.x, state.player.pos.y, PALETTE.CYAN, true, true);
               }
           }
       });
@@ -871,7 +1159,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         const baseAlpha = state.player.shield === 1 ? 0.4 : 0.9;
         const alpha = Math.max(0.2, Math.min(1, baseAlpha + pulse));
         
-        // Layer 1: Broad outer glow (The atmosphere)
         ctx.shadowBlur = 30;
         ctx.shadowColor = '#00ff00';
         ctx.strokeStyle = `rgba(0, 255, 0, ${alpha * 0.4})`;
@@ -880,7 +1167,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         ctx.arc(centerX, centerY, 26, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Layer 2: Bright core stroke (The neon tube)
         ctx.shadowBlur = 10;
         ctx.shadowColor = '#ccffcc';
         ctx.strokeStyle = `rgba(200, 255, 200, ${alpha})`; 
@@ -889,12 +1175,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         ctx.arc(centerX, centerY, 26, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Layer 3: Subtle field fill
         ctx.fillStyle = `rgba(0, 255, 0, ${alpha * 0.08})`;
         ctx.shadowBlur = 0;
         ctx.fill();
 
-        // Shield health indicator (Flicker intensely if low)
         if (state.player.shield === 1 && Math.random() > 0.8) {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.lineWidth = 1;
@@ -905,6 +1189,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
         ctx.restore();
       }
+
+      // Draw PowerUps
+      state.powerUps.forEach(p => {
+          ctx.save();
+          const bounce = Math.sin(Date.now() / 200) * 2;
+          
+          // Enhanced Flash/Glow Effect
+          const time = Date.now();
+          const flash = Math.abs(Math.sin(time / 100)); // 0 to 1 pulsing
+          const scale = 1 + flash * 0.3;
+          
+          ctx.shadowBlur = 15 + flash * 20;
+          ctx.shadowColor = p.color;
+          
+          // Draw pulsing backing glow
+          ctx.beginPath();
+          ctx.arc(p.pos.x + 10, p.pos.y + 10 + bounce, 15 * scale, 0, Math.PI*2);
+          ctx.fillStyle = `rgba(${p.color === PALETTE.POWERUP_SCATTER ? '0,255,255' : p.color === PALETTE.POWERUP_RAPID ? '255,0,85' : p.color === PALETTE.POWERUP_LIGHTNING ? '255,255,0' : '0,255,0'}, ${0.1 + flash * 0.2})`;
+          ctx.fill();
+
+          drawNeonText(p.symbol, p.pos.x, p.pos.y + bounce, p.color);
+          ctx.restore();
+      });
 
       state.aliens.filter(a => a.active).forEach(a => { drawNeonText(a.symbol, a.pos.x, a.pos.y, a.color); });
       drawLightning(ctx);
@@ -1057,9 +1364,33 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         else { ctx.fillText("INSERT COIN / PRESS [ENTER]", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2); }
         ctx.fillStyle = '#aaa';
         ctx.font = '10px "Fira Code"';
-        ctx.fillText("v1.5-SHIELD-UPGRADE | SYSTEM: ONLINE", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
+        ctx.fillText("v1.6-POWERUPS-UPDATE | SYSTEM: ONLINE", CANVAS_WIDTH / 2, CANVAS_HEIGHT - 20);
     };
     
+    const drawRainbowText = (ctx: CanvasRenderingContext2D, text: string, x: number, y: number, fontSize: number = 20) => {
+        const time = Date.now();
+        ctx.font = `bold ${fontSize}px "Fira Code"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        
+        // Gradient
+        const gradient = ctx.createLinearGradient(x - 100, y, x + 100, y);
+        const offset = (time / 20) % 360;
+        gradient.addColorStop(0, `hsl(${offset}, 100%, 50%)`);
+        gradient.addColorStop(0.5, `hsl(${(offset + 120) % 360}, 100%, 50%)`);
+        gradient.addColorStop(1, `hsl(${(offset + 240) % 360}, 100%, 50%)`);
+        
+        ctx.fillStyle = gradient;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = `hsl(${offset}, 100%, 50%)`;
+        ctx.fillText(text, x, y);
+        
+        ctx.shadowBlur = 5;
+        ctx.fillText(text, x, y);
+        
+        ctx.shadowBlur = 0;
+    };
+
     const drawGameOver = (ctx: CanvasRenderingContext2D) => {
         const centerX = CANVAS_WIDTH / 2;
         const centerY = CANVAS_HEIGHT / 2;
@@ -1068,6 +1399,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        
+        // Draw High Scores
+        drawRainbowText(ctx, "TOP SCORES", centerX, centerY - 140, 20);
+        gameState.current.highScores.forEach((s, i) => {
+             drawRainbowText(ctx, `${i+1}. ${s.toString().padStart(5, '0')}`, centerX, centerY - 110 + (i * 25), 16);
+        });
+
         ctx.font = 'bold 60px "Fira Code"';
         const glitchOffset = (Math.random() - 0.5) * 15;
         const mainJitterX = (Math.random() - 0.5) * 4;
@@ -1076,37 +1414,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
         ctx.fillStyle = 'rgba(139, 0, 0, 0.4)'; 
         ctx.shadowBlur = 40;
         ctx.shadowColor = color;
-        ctx.fillText("GAME OVER", centerX + glitchOffset, centerY - 10 + (Math.random() - 0.5) * 10);
+        ctx.fillText("GAME OVER", centerX + glitchOffset, centerY + 20 + (Math.random() - 0.5) * 10);
         ctx.fillStyle = color;
         ctx.shadowColor = color;
         ctx.shadowBlur = 30; 
-        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY - 10 + mainJitterY);
+        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY + 20 + mainJitterY);
         ctx.shadowBlur = 15; 
-        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY - 10 + mainJitterY);
+        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY + 20 + mainJitterY);
         ctx.shadowBlur = 5; 
-        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY - 10 + mainJitterY);
+        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY + 20 + mainJitterY);
         ctx.shadowBlur = 0;
-        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY - 10 + mainJitterY);
+        ctx.fillText("GAME OVER", centerX + mainJitterX, centerY + 20 + mainJitterY);
 
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#aaa';
         ctx.font = '16px "Fira Code"';
-        ctx.fillText("SIGNAL LOST...", centerX, centerY + 40);
+        ctx.fillText("SIGNAL LOST...", centerX, centerY + 70);
 
         if (Math.floor(Date.now() / 600) % 2 === 0) {
              ctx.fillStyle = PALETTE.CYAN;
              ctx.shadowBlur = 15;
              ctx.shadowColor = PALETTE.CYAN;
              ctx.font = '14px "Fira Code"';
-             if (isMobile) { ctx.fillText("TAP TO RETRY", centerX, centerY + 70); } 
-             else { ctx.fillText("PRESS [ENTER] TO RETRY", centerX, centerY + 70); }
+             if (isMobile) { ctx.fillText("TAP TO RETRY", centerX, centerY + 100); } 
+             else { ctx.fillText("PRESS [ENTER] TO RETRY", centerX, centerY + 100); }
         }
         ctx.restore();
     };
 
     const drawVictory = (ctx: CanvasRenderingContext2D) => {
         ctx.fillStyle = 'rgba(13, 2, 33, 0.8)';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillRect(-gameState.current.screenShake, -gameState.current.screenShake, CANVAS_WIDTH, CANVAS_HEIGHT);
         ctx.shadowBlur = 50;
         ctx.shadowColor = PALETTE.ELECTRIC_BLUE;
         ctx.fillStyle = PALETTE.ELECTRIC_BLUE;
