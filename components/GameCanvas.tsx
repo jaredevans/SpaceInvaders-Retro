@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef } from 'react';
 import { Alien, AlienSpecies, Entity, GameStatus, Particle, Projectile, PowerUp, PowerUpType } from '../types';
 
@@ -104,7 +103,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     attackCooldown: 60,
     lastSpecialTime: 0, // Timer for special bullet
     playerCooldown: 0, // For auto-fire
-    shotsFired: 0, // Track shots for super laser
     screenShake: 0, // Current shake intensity
     activePowerUp: null as { type: PowerUpType, endTime: number } | null,
     ufoSpawnCount: 0,
@@ -175,7 +173,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
     gameState.current.pauseUntil = 0;
     gameState.current.lastSpecialTime = Date.now();
     gameState.current.playerCooldown = 0;
-    gameState.current.shotsFired = 0;
     gameState.current.screenShake = 0;
     gameState.current.activePowerUp = null;
     gameState.current.ufoSpawnCount = 0;
@@ -593,15 +590,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
 
       // Shooting
       if (state.keys.shoot) {
-        state.shotsFired++;
-        const isSuper = (state.shotsFired % 10 === 0);
         const bulletX = state.player.pos.x + state.player.width / 2 - 2;
         const bulletY = state.player.pos.y;
         
         createMuzzleFlash(bulletX + 2, bulletY);
         
         // Scatter Powerup Logic
-        if (state.activePowerUp?.type === 'SCATTER' && !isSuper) {
+        if (state.activePowerUp?.type === 'SCATTER') {
             [-1, 0, 1].forEach(dir => {
                 state.bullets.push({
                     pos: { x: bulletX, y: bulletY },
@@ -610,25 +605,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
                 });
             });
         } else {
-             // Normal or Super Shot
+             // Normal Shot
              state.bullets.push({
                 pos: { x: bulletX, y: bulletY },
-                width: isSuper ? 6 : 4, 
-                height: isSuper ? CANVAS_HEIGHT : 10, // Super laser is tall
+                width: 4, 
+                height: 10, 
                 active: true, 
-                velocity: isSuper ? -BULLET_SPEED * 2 : -BULLET_SPEED, 
+                velocity: -BULLET_SPEED, 
                 isEnemy: false, 
-                symbol: isSuper ? '||' : '|', 
-                color: isSuper ? PALETTE.ELECTRIC_BLUE : PALETTE.YELLOW,
-                piercing: isSuper
+                symbol: '|', 
+                color: PALETTE.YELLOW
              });
         }
 
-        if (isSuper) {
-            triggerShake(5);
-            onLog("System: SUPER LASER DISCHARGED");
-        }
-        
         // Handle Cooldown for desktop manual fire (prevent rapid spam)
         state.keys.shoot = false; 
       }
@@ -671,7 +660,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
             b.pos.y += b.velocity;
             b.pos.x += b.vx || 0; // For scatter
             // Check bounds (piercing bullets go off screen)
-            if (b.pos.y < -50 || b.pos.y > CANVAS_HEIGHT) b.active = false;
+            if (b.pos.y < -500 || b.pos.y > CANVAS_HEIGHT) b.active = false;
         }
       });
       
@@ -1248,7 +1237,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ status, setStatus, score, setSc
          }
       });
 
+      // Split player bullets into standard and super lasers
       const playerBullets = state.bullets.filter(b => !b.isEnemy && b.active);
+
       if (playerBullets.length > 0) {
              const hue = (time * 0.5) % 360; 
              const cycleColor = `hsl(${hue}, 100%, 60%)`;
